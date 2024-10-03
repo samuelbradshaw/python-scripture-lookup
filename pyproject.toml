@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools", "setuptools_scm[toml]>=6.2"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "scripturelookup"
+authors = [
+    {name = "Samuel Bradshaw", email = "samuel.h.bradshaw@gmail.com"},
+]
+description = "Python and command-line utility for converting scripture references between formats."
+readme = "README.md"
+license = {file = "LICENSE"}
+keywords = ["python", "command", "scripture", "bible", "book of mormon", "reference",]
+classifiers = [
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+]
+requires-python = ">=3.8"
+dynamic = ["version"]
+dependencies = [
+    "requests",
+]
+
+[project.urls]
+Repository = "https://github.com/samuelbradshaw/python-scripture-lookup"
+Issues = "https://github.com/samuelbradshaw/python-scripture-lookup/issues"
+Changelog = "https://github.com/samuelbradshaw/python-scripture-lookup/releases"
+
+[project.scripts]
+scripturelookup = "scripturelookup.command_line:main_cli"
+
+[tool.setuptools_scm]

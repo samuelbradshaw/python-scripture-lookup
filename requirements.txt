@@ -1,0 +1,3 @@
+requests
+
+# -e git+https://github.com/logicalperson0/geezify-python.git@main#egg=geezify-python-main
