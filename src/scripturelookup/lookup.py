@@ -105,11 +105,12 @@ class Reference:
     return uri
   
   # Get the Church website URL (e.g. https://www.churchofjesuschrist.org/study/scriptures/bofm/1-ne/3?id=p7&lang=eng#p7)
-  # TODO: Add validation based on online availability in the given language
   def church_url(self, skip_lang = False, skip_fragment = False):
     url = 'https://www.churchofjesuschrist.org/study'
     url += self.church_uri(use_query_parameters = True)
     if not skip_lang:
+      if self.lang not in data.scriptures['summary']['churchAvailability'][self.publication_slug]:
+        return ''
       church_lang = data.languages['languages'][self.lang]['churchLang']
       url += f'&lang={church_lang}' if '?' in url else f'?lang={church_lang}'
     if self.verse_groups and not skip_fragment:
@@ -273,6 +274,10 @@ def parse_references_string(input_string, lang = 'en'):
     if book_slug in data.scriptures['structure'].keys():
       publication_slug = book_slug
       book_slug = None
+    else:
+      for pub_slug, pub_data in data.scriptures['structure'].items():
+        if book_slug in pub_data['books'].keys():
+          publication_slug = pub_slug
     
     reference = Reference(lang = lang, publication_slug = publication_slug, book_slug = book_slug, chapter = chapter, verse_groups = verse_groups, context_verse_groups = context_verse_groups)
     references.append(reference)
