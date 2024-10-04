@@ -102,6 +102,7 @@ Several options are available. Some are only applicable to certain commands.
 
 - **lang** (optional) – Output language. BCP 47 language codes and Gospel Library language codes are supported. Default: 'en'.
 - **separator** (optional) – String separator between outputs when a list of references is being requested. Default: '\n'.
+- **source** (optional) – Content source. Default: 'python-scripture-scraper'. Supported values: 'python-scripture-scraper' or 'ChurchofJesusChrist.org'.
 - **link_class** (optional) – String for the “class” attribute on links. Default: None.
 - **link_target** (optional) – String for the “target” attribute on links. Default: None.
 - **use_query_parameters** (optional) – Whether query parameters should be used on URIs. Default: False.

@@ -10,6 +10,7 @@ def main_cli():
   parser.add_argument('input', help='Input text to parse (one or more references).')
   parser.add_argument('--lang', help='Output language. Default: "en".')
   parser.add_argument('--separator', help='Separator when there are multiple results. Default: "\n".')
+  parser.add_argument('--source', help='Content source ("python-scripture-scraper" or "ChurchofJesusChrist.org"). Default: "python-scripture-scraper".')
   parser.add_argument('--link_class', help='Link "class" attribute.')
   parser.add_argument('--link_target', help='Link "target" attribute.')
   parser.add_argument('--use_query_parameters', action='store_true', help='Use "id" and "context" parameters in URIs.')
@@ -25,6 +26,7 @@ def main_cli():
     args.input,
     lang = args.lang or 'en',
     separator = args.separator or '\n',
+    source = args.source or 'python-scripture-scraper',
     link_class = args.link_class,
     link_target = args.link_target,
     use_query_parameters = args.use_query_parameters,
