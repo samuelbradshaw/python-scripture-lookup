@@ -7,7 +7,7 @@ from . import data, numbers, lookup
 def main_cli():
   parser = argparse.ArgumentParser(description='Scripture lookup')
   parser.add_argument('command', help='Command to run. Required.')
-  parser.add_argument('--input', help='Input text to parse (one or more references).')
+  parser.add_argument('input', help='Input text to parse (one or more references).')
   parser.add_argument('--lang', help='Output language. Default: "en".')
   parser.add_argument('--separator', help='Separator when there are multiple results. Default: "\n".')
   parser.add_argument('--link_class', help='Link "class" attribute.')

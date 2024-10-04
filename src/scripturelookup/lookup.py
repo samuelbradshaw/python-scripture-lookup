@@ -289,6 +289,11 @@ def parse_references_string(input_string, lang = 'en'):
   return references
 
 
+# Functions that can be called via Python or from the command line (see README.md for more information)
+
+def get_content(input_string, lang = 'en', separator = '\n', source = 'python-scripture-scraper', **kwargs):
+  references = parse_references_string(input_string, lang = lang)
+  return separator.join([ref.content(source = source) for ref in references])
 
 def get_label(input_string, lang = 'en', separator = '\n', skip_book_name = False, abbreviated = False, **kwargs):
   references = parse_references_string(input_string, lang = lang)
@@ -314,7 +319,3 @@ def get_punctuation(lang = 'en', **kwargs):
 
 def get_numerals(lang = 'en', **kwargs):
   return data.scriptures['languages'][lang]['numerals']
-
-def get_content(input_string, lang = 'en', separator = '\n', source = 'python-scripture-scraper', **kwargs):
-  references = parse_references_string(input_string, lang = lang)
-  return separator.join([ref.content(source = source) for ref in references])
