@@ -2,9 +2,11 @@
 import os
 import sys
 import json
+import time
 
 # Third-party libraries
 import requests
+from bs4 import BeautifulSoup
 
 
 data_directory = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'data')
@@ -12,7 +14,7 @@ os.makedirs(data_directory, exist_ok = True)
 
 # Download JSON data
 def download_data(filename, filepath):
-  request_url = f'https://raw.githubusercontent.com/samuelbradshaw/python-scripture-scraper/refs/heads/main/sample/{filename}'
+  request_url = f'https://cdn.jsdelivr.net/gh/samuelbradshaw/python-scripture-scraper@main/sample/{filename}'
   r = requests.get(request_url)
   r.encoding = 'utf-8'
   if r and r.status_code == 200:
@@ -41,7 +43,6 @@ languages = load_data('metadata-languages.min.json')
 scriptures = load_data('metadata-scriptures.min.json')
 
 
-
 # Get the BCP 47 language tag for a given language code
 def get_bcp47(lang):
   if lang and 'Hant' in lang:
@@ -56,3 +57,61 @@ def get_bcp47(lang):
       sys.stdout.write(f'Warning: Couldn’t find BCP 47 language tag for “{lang}” – falling back to “en” (English).\n')
   
   return bcp47
+
+
+# Get the content for a given chapter verse from python-scripture-scraper or ChurchofJesusChrist.org
+def request_content(publication_slug, book_slug, chapter, verse_groups, church_url, lang = 'en', source = 'python-scripture-scraper'):
+  text_content = ''
+  
+  if not publication_slug and book_slug and chapter:
+    return text_content
+  
+  verse_numbers = []
+  if verse_groups:
+    for verse_group in verse_groups:
+      for verse_number in verse_group:
+        verse_numbers.append(str(verse_number))
+  
+  if source == 'python-scripture-scraper':
+    request_url = f'https://cdn.jsdelivr.net/gh/samuelbradshaw/python-scripture-scraper@main/sample/en-json/{publication_slug}/{book_slug}/{book_slug}-{chapter}.json'
+    r = requests.get(request_url)
+    r.encoding = 'utf-8'
+    if r and r.status_code == 200:
+      chapter_data = r.json()
+      
+      if verse_numbers:
+        for paragraph in chapter_data['paragraphs']:
+          if paragraph['type'] == 'verse' and paragraph['number'] in verse_numbers:
+            text_content += paragraph['number'] + ' ' + paragraph['content'] + '\n\n'
+      else:
+        for paragraph in chapter_data['paragraphs']:
+          text_content += (paragraph['number'] + ' ' if paragraph['number'] else '') + paragraph['content'] + '\n\n'
+      
+      text_content += '---------------------\n'
+      text_content += 'Source: https://github.com/samuelbradshaw/python-scripture-scraper/tree/main/sample\n'
+      text_content += 'Public domain.\n'
+  
+  elif source == 'ChurchofJesusChrist.org' and church_url:
+    r = requests.get(church_url)
+    r.encoding = 'utf-8'
+    if r and r.status_code == 200:
+      soup = BeautifulSoup(r.text, 'html.parser')
+      paragraphs = soup.select('header [data-aid], .body-block [data-aid]')
+      if verse_numbers:
+        for paragraph in paragraphs:
+          verse_number_span = paragraph.select_one('.verse-number')
+          if verse_number_span and verse_number_span.text.strip() in verse_numbers:
+            text_content += paragraph.text.strip() + '\n\n'
+      else:
+        for paragraph in paragraphs:
+          text_content += paragraph.text.strip() + '\n\n'
+        
+      text_content += '---------------------\n'
+      text_content += f'Source: {church_url}\n'
+      text_content += 'Some content from this source may be subject to copyright.\n'
+      
+      # Pause for 1 second between requests to avoid overloading server
+      time.sleep(1)
+    
+  return text_content
+

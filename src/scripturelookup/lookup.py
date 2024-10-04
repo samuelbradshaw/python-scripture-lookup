@@ -128,6 +128,10 @@ class Reference:
     url = self.church_url(skip_lang = skip_lang, skip_fragment = skip_fragment)
     return f'<a href="{url}"{additional_attributes}>{label}</a>'
   
+  # Get chapter or verse content
+  def content(self, source):
+    return data.request_content(self.publication_slug, self.book_slug, self.chapter, self.verse_groups, self.church_url(), lang = self.lang, source = source)
+  
   def __str__(self):
     return label(self)
 
@@ -310,3 +314,7 @@ def get_punctuation(lang = 'en', **kwargs):
 
 def get_numerals(lang = 'en', **kwargs):
   return data.scriptures['languages'][lang]['numerals']
+
+def get_content(input_string, lang = 'en', separator = '\n', source = 'python-scripture-scraper', **kwargs):
+  references = parse_references_string(input_string, lang = lang)
+  return separator.join([ref.content(source = source) for ref in references])

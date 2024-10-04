@@ -1,3 +1,2 @@
-requests
-
-# -e git+https://github.com/logicalperson0/geezify-python.git@main#egg=geezify-python-main
+requests==2.32.3
+beautifulsoup4==4.12.3
