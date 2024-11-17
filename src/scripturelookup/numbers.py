@@ -105,7 +105,7 @@ def get_formatted_number(number, target_lang = None, target_format = None, targe
   
 
 # Convert a formatted number to an integer
-def convert_number_to_int(number):
+def convert_number_to_int(number, advanced_conversion_types = ['chinese', 'geez']):
   int_number = None
   
   if isinstance(number, int) or isinstance(number, float):
@@ -116,13 +116,13 @@ def convert_number_to_int(number):
     try:
       int_number = int(number)
     except:
-      if all(char in ['〇', '零', '一', '二', '三', '四', '五', '六', '七', '八', '九', '十', '百', '千', '万', '萬', '亿', '億'] for char in number):
+      if 'chinese' in advanced_conversion_types and all(char in ['〇', '零', '一', '二', '三', '四', '五', '六', '七', '八', '九', '十', '百', '千', '万', '萬', '亿', '億'] for char in number):
         int_number = chinese_numerals_to_int(number)
-      elif all(char in ['፲', '፳', '፴', '፵', '፶', '፷', '፸', '፹', '፺', '፻'] for char in number):
+      elif 'geez' in advanced_conversion_types and all(char in ['፲', '፳', '፴', '፵', '፶', '፷', '፸', '፹', '፺', '፻'] for char in number):
         int_number = geez_numerals_to_int(number)
-      elif all(char in ['I', 'V', 'X', 'L', 'C', 'D', 'M', 'i', 'v', 'x', 'l', 'c', 'd', 'm'] for char in number):
+      elif 'roman' in advanced_conversion_types and all(char in ['I', 'V', 'X', 'L', 'C', 'D', 'M', 'i', 'v', 'x', 'l', 'c', 'd', 'm'] for char in number):
         int_number = roman_numerals_to_int(number)
-      elif all(char in ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z'] for char in number):
+      elif 'alphabet' in advanced_conversion_types and all(char in ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z'] for char in number):
         int_number = alphabet_numerals_to_int(number)
       else:
         int_number = number

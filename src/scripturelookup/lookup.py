@@ -32,6 +32,9 @@ class Reference:
         publication_name = translated_names.get(self.publication_slug, {}).get('abbrev') or publication_name
       return publication_name
     
+    if not self.book_slug:
+      skip_book_name = True
+    
     label = ''
     book_slug = self.book_slug
     if not skip_book_name:
@@ -58,11 +61,25 @@ class Reference:
         label += punctuation['bookChapterSeparator']
       
       # Get localized chapter name
+      def format_chapter_range(chapter_string):
+        groups = re.split(data.verse_group_separators_pattern, chapter_string)
+        new_groups = []
+        for group in groups:
+          range_parts = re.split(data.verse_range_separators_pattern, group)
+          new_range_parts = []
+          for range_part in range_parts:
+            chapter_verse_parts = re.split(data.chapter_verse_separators_pattern, range_part)
+            new_chapter_verse_parts = []
+            for num in chapter_verse_parts:
+              new_chapter_verse_parts.append(numbers.get_formatted_number(num, target_lang = self.lang, target_custom_numerals = numerals))
+            new_range_parts.append(punctuation['chapterVerseSeparator'].join(new_chapter_verse_parts))
+          new_groups.append(punctuation['verseRangeSeparator'].join(new_range_parts))
+        return punctuation['verseGroupSeparator'].join(new_groups)
       chapter_name = (
         translated_names.get(self.chapter, {}).get('name') or
         english_translated_names.get(self.chapter, {}).get('name') or
         numbers.get_formatted_number(self.chapter, target_lang = self.lang, target_custom_numerals = numerals) or
-        punctuation['verseRangeSeparator'].join([numbers.get_formatted_number(ch, target_lang = self.lang, target_custom_numerals = numerals) for ch in re.split(verse_range_separators_pattern, self.chapter)]) or
+        format_chapter_range(self.chapter or '') or
         self.chapter
       )
       if abbreviated:
@@ -93,9 +110,9 @@ class Reference:
     
     if uri and self.chapter:
       chapter = str(self.chapter)
-      if re.match(rf'\d+{verse_range_separators_pattern}\d+', chapter):
+      if re.match(rf'\d+{data.verse_range_separators_pattern}\d+', chapter):
         # Chapter range – only use the first chapter
-        chapter = re.split(verse_range_separators_pattern, chapter)[0]
+        chapter = re.split(data.verse_range_separators_pattern, chapter)[0]
       uri += '/' + str(chapter)
       if self.verse_groups:
         if use_query_parameters:
@@ -114,7 +131,7 @@ class Reference:
     url = 'https://www.churchofjesuschrist.org/study'
     url += self.church_uri(use_query_parameters = True)
     if not skip_lang:
-      if self.lang not in data.scriptures['summary']['churchAvailability'][self.publication_slug]:
+      if not self.publication_slug or self.lang not in data.scriptures['summary']['churchAvailability'][self.publication_slug]:
         return ''
       church_lang = data.languages['languages'][self.lang]['churchLang']
       url += f'&lang={church_lang}' if '?' in url else f'?lang={church_lang}'
@@ -157,29 +174,54 @@ def normalizeForCompare(text):
 
 
 # Parse verses into verse groups
-# Example: '1-2,5-7' –> [[1, 2], [5, 6, 7]]
-def parse_verses_string(verses_string):
+# Example: '1-2,5-7,9' –> [[1, 2], [5, 6, 7], [9]]
+def parse_verses_string(verses_string, lang = 'en'):
   verses_string = (verses_string or '').replace('p', '').strip()
   if not verses_string:
     return None
   
   unique_verses = set()
-  for verse_group_string in re.split(verse_group_separators_pattern, verses_string):
-    verse_strings = re.split(verse_range_separators_pattern, verse_group_string)
+  all_verses_are_integers = True
+  for verse_group_string in re.split(rf'(?:{data.verse_group_separators_pattern})+', verses_string):
+    verse_strings = re.split(data.verse_range_separators_pattern, verse_group_string)
     lower_int = numbers.convert_number_to_int(verse_strings[0])
     upper_int = numbers.convert_number_to_int(verse_strings[-1])
-    unique_verses.update(range(lower_int, upper_int + 1))
+    
+    if isinstance(lower_int, int) and isinstance(upper_int, int):
+      if lower_int > upper_int:
+        # Handle abbreviated verse ranges, as in D&C 124:123–45
+        reversed_lower_str = str(lower_int)[::-1] # 321
+        reversed_upper_str = str(upper_int)[::-1] # 54
+        digits_to_add = len(reversed_lower_str) - len(reversed_upper_str)
+        if digits_to_add > 0:
+          new_reversed_upper_str = reversed_upper_str + reversed_lower_str[-digits_to_add:]
+          upper_int = int(new_reversed_upper_str[::-1])
+      unique_verses.update(range(lower_int, upper_int + 1))
+    else:
+      all_verses_are_integers = False
+      unique_verses.update([lower_int, upper_int])
+  
+  if all_verses_are_integers:
+    verses = sorted(unique_verses)
+  else:
+    if lang not in natural_sort_collators:
+      natural_sort_collators[lang] = icu.Collator.createInstance(icu.Locale(lang))
+      natural_sort_collators[lang].setAttribute(icu.UCollAttribute.NUMERIC_COLLATION, icu.UCollAttributeValue.ON)
+    verses = sorted([str(v) for v in unique_verses], key=natural_sort_collators[lang].getSortKey)
+    verses = [numbers.convert_number_to_int(v) for v in verses]
   
   verse_groups = []
-  verses = sorted(unique_verses)
   previous_verse = -1
   for verse in verses:
-    if verse == previous_verse + 1:
-      verse_groups[-1].append(verse)
+    if isinstance(verse, int):
+      if verse == previous_verse + 1:
+        verse_groups[-1].append(verse)
+      else:
+        verse_groups.append([verse])
+      previous_verse = verse
     else:
       verse_groups.append([verse])
-    previous_verse = verse
-  
+      previous_verse = -1
   return verse_groups
 
 
@@ -200,12 +242,86 @@ def convert_verse_groups_to_string(verse_groups, verse_range_separator, verse_gr
 def parse_references_string(input_string, lang = 'en', sort_by = None):
   lang = data.get_bcp47(lang)
   
-  input_list = re.split(reference_separators_pattern, input_string)
-  references = []
+  # Remove leading or trailing whitespace and punctuation
+  punctuation_to_strip = ''.join(data.scriptures['summary']['punctuation']['referenceSeparator'] + data.scriptures['summary']['punctuation']['verseGroupSeparator'] + data.scriptures['summary']['punctuation']['verseRangeSeparator']) + '(;,.'
+  input_string = input_string.strip().strip(punctuation_to_strip).rstrip(':').strip()
   
+  # If language is English, replace roman numerals with numbers. Example: 'II Corinthians" –> "2 Corinthians"
+  if lang == 'en':
+    input_string = re.sub(r'\bi\s', '1', input_string, flags=re.IGNORECASE)
+    input_string = re.sub(r'\bii\s', '2', input_string, flags=re.IGNORECASE)
+    input_string = re.sub(r'\biii\s', '3', input_string, flags=re.IGNORECASE)
+    input_string = re.sub(r'\biv\s', '4', input_string, flags=re.IGNORECASE)
+  
+  # Remove commas from book names so further normalization doesn't try to split it into two references. Example: "JST, Genesis 1" –> "JST Genesis 1"
+  input_string = input_string.replace('\xa0', ' ')
+  scripture_book_names = set()
+  scripture_book_names_without_commas = []
+  for volume_data in data.scriptures['structure'].values():
+    for book_slug in volume_data['books'].keys():
+      book_info = data.scriptures['languages'][lang]['translatedNames'].get(book_slug)
+      if book_info:
+        book_name = (book_info.get('name') or '').replace('\xa0', ' ')
+        if book_name:
+          scripture_book_names.add(book_name)
+        book_abbrev = (book_info.get('abbrev') or '').replace('\xa0', ' ')
+        if book_abbrev:
+          scripture_book_names.add(book_abbrev)
+  scripture_book_names = sorted(scripture_book_names, key=lambda x: (-len(x), x))
+  for scripture_book_name in scripture_book_names:
+    scripture_book_name_without_comma = re.sub(data.verse_group_separators_pattern, '', scripture_book_name)
+    scripture_book_names_without_commas.append(scripture_book_name_without_comma)
+    if scripture_book_name in input_string and re.search(data.verse_group_separators_pattern, scripture_book_name):
+      input_string = input_string.replace(scripture_book_name, scripture_book_name_without_comma)
+  
+  # Normalize whitespace-separated references. Example: "Genesis 1:2 1 Nephi 3:7" –> "; Genesis 1:2 ; 1 Nephi 3:7"
+  scripture_book_names_pattern = '|'.join([re.escape(sbn) for sbn in scripture_book_names_without_commas])
+  input_string = re.sub(rf'\b({scripture_book_names_pattern})', r'; \1', input_string, flags=re.IGNORECASE)
+  
+  # Normalize lists and ranges. Example: "Genesis 12:1, 2, and 3; verses 1 and 4; John 2 through 7" –> "Genesis 12:1, 2,,3; verses 1,4; John 2–7"
+  input_string = re.sub(r'\s+(?:and|y|e|et|&)\s+(\d+)', r',\1', input_string)
+  input_string = re.sub(r'\s+(?:through|thru|to|al|a|à)\s+(\d+)', r'–\1', input_string)
+  
+  # Normalize verse sets. Example: "chapter 3 verse 7; vv. 3, 6" –> "chapter 3:7; :3, 6"
+  input_string = re.sub(r'(?:^|\s)(?:verses|verse|vv\.|v\.|versículos|versículo|versets|verset)\s(\d+)', r':\1', input_string).replace('::', ':')
+  
+  # Normalize chapter sets. Example: "Genesis 1, 2, 4–5, Exodus 10; Alma 32" –> "Genesis 1; 2; 4–5; Exodus 10; Alma 32"
+  if re.search(data.verse_group_separators_pattern, input_string) and not re.search(data.chapter_verse_separators_pattern, input_string):
+    input_string = re.sub(rf'(?:{data.verse_group_separators_pattern})+', ';', input_string)
+  
+  # Normalize chapter:verse sets. Example: "Genesis 6:7a, 6:13a, 15; 1 Nephi 3:7 (twice), 8:21" –> "Genesis 6:7a; 6:13a, 15; 1 Nephi 3:7 (twice); 8:21"
+  if re.search(data.chapter_verse_separators_pattern, input_string):
+    references_list = re.split(data.reference_separators_pattern, input_string)
+    new_references_list = []
+    for reference in references_list:
+      reference_parts = re.split(data.verse_group_separators_pattern, reference)
+      reference_input_string = ''
+      for part in reference_parts:
+        if reference_input_string == '':
+          reference_input_string += part
+        elif re.search(data.chapter_verse_separators_pattern, part):
+          reference_input_string += ';' + part
+        else:
+          reference_input_string += ',' + part
+      new_references_list.append(reference_input_string)
+    input_string = ';'.join(new_references_list)
+  
+  input_list = re.split(data.reference_separators_pattern, input_string)
+  
+  references = []
   previous_book_slug = None
+  previous_chapter = None
   for input_string in input_list:
-    input_string = input_string.strip()
+    # Remove leading or trailing whitespace and punctuation on the individual reference
+    input_string = input_string.strip().strip(punctuation_to_strip).rstrip(':').strip()
+    if not input_string:
+      continue
+    
+    # Remove trailing text. Example: "1 John 3:2 2" –> "1 John 3:2"
+    trailing_text_match = re.match(rf'^.*?\d((?:\:|{data.closing_parenthesis_pattern})?\s+[^{data.opening_parenthesis_pattern}|\s]+)$', input_string)
+    if trailing_text_match:
+      trailing_text_string = trailing_text_match.group(1)
+      input_string = input_string.removesuffix(trailing_text_string)
     
     verses_string = None
     context_verses_string = None
@@ -250,12 +366,19 @@ def parse_references_string(input_string, lang = 'en', sort_by = None):
       # Examples: Old Testament; 1 Nephi; Matthew 1; Helaman 5:12; words-of-mormon
       
       # Get verses string
-      unparsed, verses_string = (re.split(chapter_verse_separators_pattern, input_string) + [''])[:2]
-      verses_string, context_verses_string = (re.split(opening_parenthesis_pattern, re.sub(closing_parenthesis_pattern, '', verses_string)) + [''])[:2]
+      parts = re.split(data.chapter_verse_separators_pattern, input_string)
+      if len(parts) == 2:
+        # Regular chapter and verse found
+        unparsed, verses_string = parts
+      else:
+        # Chapter only, or special case like 'Genesis 7:17–8:9' or 'Genesis 1–5'
+        unparsed = input_string
+        verses_string = ''
+      verses_string, context_verses_string = (re.split(data.opening_parenthesis_pattern, re.sub(data.closing_parenthesis_pattern, '', verses_string)) + [''])[:2]
       
       # Get chapter string and book string
       book_string = unparsed
-      chapter_match = re.match(rf'^(?:.*[^\d{verse_range_separators_pattern}])?([\d{verse_range_separators_pattern}]*)$', book_string)
+      chapter_match = re.match(rf'^.*?(\d(?:\d|\s|{data.chapter_verse_separators_pattern}|{data.verse_range_separators_pattern}|{data.verse_group_separators_pattern})*)$', book_string)
       if chapter_match:
         chapter_string = chapter_match.group(1)
         book_string = book_string.removesuffix(chapter_string).strip()
@@ -272,12 +395,32 @@ def parse_references_string(input_string, lang = 'en', sort_by = None):
           if normalizeForCompare(book_string) == normalizeForCompare(key):
             book_slug = value
             break
-      if book_slug == previous_book_slug:
-        skip_book_name = True
-      previous_book_slug = book_slug
+      # Special handling for Abraham facsimiles
+      if book_slug == 'facsimiles' or (not book_slug and 'fac' in book_string.lower()):
+        if previous_book_slug == 'abraham' and not previous_chapter:
+          del references[-1]
+        book_slug = 'abraham'
+        if chapter:
+          chapter = f'fac-{chapter}'
+        elif verse_groups:
+          chapter = f'fac-{verse_groups[0][0]}'
+          verse_groups = None
+      # Special handling for Psalms and similar cases
+      elif book_slug == 'psalm':
+        book_slug = 'psalms'
+      elif book_slug == 'section':
+        book_slug = 'sections'
+      elif book_slug == 'jst-psalms':
+        book_slug = 'jst-psalm'
+      elif book_slug == 'official-declaration':
+        book_slug = 'official-declarations'
     else:
       book_slug = previous_book_slug
+    
+    if book_slug == previous_book_slug:
       skip_book_name = True
+      if previous_chapter and not chapter:
+        chapter = previous_chapter
     
     publication_slug = None
     if book_slug in data.scriptures['structure'].keys():
@@ -290,6 +433,9 @@ def parse_references_string(input_string, lang = 'en', sort_by = None):
     
     reference = Reference(lang = lang, publication_slug = publication_slug, book_slug = book_slug, chapter = chapter, verse_groups = verse_groups, context_verse_groups = context_verse_groups)
     references.append(reference)
+    
+    previous_chapter = chapter
+    previous_book_slug = book_slug
     
   return sort_references(references, lang = lang, sort_by = sort_by)
 
