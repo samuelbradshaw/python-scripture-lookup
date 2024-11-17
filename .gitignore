@@ -8,3 +8,5 @@ Icon?
 *~
 
 localtesting.py
+build/*
+src/scripturelookup.egg-info/*

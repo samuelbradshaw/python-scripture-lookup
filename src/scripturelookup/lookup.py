@@ -3,9 +3,14 @@ import sys
 import re
 import unicodedata
 
+# Third-party libraries
+import icu
+
 # Internal imports
 from . import data, numbers
 
+
+natural_sort_collators = {}
 
 class Reference:
   def __init__(self, lang = 'en', publication_slug = None, book_slug = None, chapter = None, verse_groups = [], context_verse_groups = []):
@@ -132,16 +137,16 @@ class Reference:
   def content(self, source):
     return data.request_content(self.publication_slug, self.book_slug, self.chapter, self.verse_groups, self.church_url(), lang = self.lang, source = source)
   
+  # Get chapter or verse content
+  def attributes(self):
+    return self.__dict__
+  
   def __str__(self):
-    return label(self)
-
-
-reference_separators_pattern = r'|'.join([re.escape(s.strip()) for s in data.scriptures['summary']['punctuation']['referenceSeparator']] + [re.escape(';'), re.escape('\n')])
-chapter_verse_separators_pattern = r'|'.join([re.escape(s.strip()) for s in data.scriptures['summary']['punctuation']['chapterVerseSeparator']] + [re.escape(':')])
-verse_group_separators_pattern = r'|'.join([re.escape(s.strip()) for s in data.scriptures['summary']['punctuation']['verseGroupSeparator']] + [re.escape(',')])
-verse_range_separators_pattern = r'|'.join([re.escape(s.strip()) for s in data.scriptures['summary']['punctuation']['verseRangeSeparator']] + [re.escape('-'), re.escape('–'), re.escape('〜')])
-opening_parenthesis_pattern = r'|'.join([re.escape(s.strip()) for s in data.scriptures['summary']['punctuation']['openingParenthesis']] + [re.escape('(')])
-closing_parenthesis_pattern = r'|'.join([re.escape(s.strip()) for s in data.scriptures['summary']['punctuation']['closingParenthesis']] + [re.escape(')')])
+    return self.label()
+  
+  def __lt__(self, other):
+    # TODO: Provide better algorithm for sorting
+    return 0 < 1
 
 
 # Normalize text by removing anything that's not a letter or number, and converting to lowercase. This allows for a fuzzy comparison between input text and a known list of values.
@@ -192,7 +197,7 @@ def convert_verse_groups_to_string(verse_groups, verse_range_separator, verse_gr
 
 
 # Parse one or more scripture references, URIs, URLs, or slugs
-def parse_references_string(input_string, lang = 'en'):
+def parse_references_string(input_string, lang = 'en', sort_by = None):
   lang = data.get_bcp47(lang)
   
   input_list = re.split(reference_separators_pattern, input_string)
@@ -286,7 +291,7 @@ def parse_references_string(input_string, lang = 'en'):
     reference = Reference(lang = lang, publication_slug = publication_slug, book_slug = book_slug, chapter = chapter, verse_groups = verse_groups, context_verse_groups = context_verse_groups)
     references.append(reference)
     
-  return references
+  return sort_references(references, lang = lang, sort_by = sort_by)
 
 
 # Functions that can be called via Python or from the command line (see README.md for more information)
@@ -295,22 +300,29 @@ def get_content(input_string, lang = 'en', separator = '\n', source = 'python-sc
   references = parse_references_string(input_string, lang = lang)
   return separator.join([ref.content(source = source) for ref in references])
 
-def get_label(input_string, lang = 'en', separator = '\n', skip_book_name = False, abbreviated = False, **kwargs):
-  references = parse_references_string(input_string, lang = lang)
+def get_label(input_string, lang = 'en', separator = '\n', sort_by = None, skip_book_name = False, abbreviated = False, **kwargs):
+  references = parse_references_string(input_string, lang = lang, sort_by = sort_by)
   return separator.join([ref.label(skip_book_name = skip_book_name, abbreviated = abbreviated) for ref in references])
 
-def get_church_uri(input_string, separator = '\n', use_query_parameters = False, **kwargs):
-  references = parse_references_string(input_string)
+def get_church_uri(input_string, separator = '\n', sort_by = None, use_query_parameters = False, **kwargs):
+  references = parse_references_string(input_string, lang = lang, sort_by = sort_by)
   return separator.join([ref.church_uri(use_query_parameters = use_query_parameters) for ref in references])
 
-def get_church_url(input_string, lang = 'en', separator = '\n', skip_lang = False, skip_fragment = False, **kwargs):
-  references = parse_references_string(input_string, lang = lang)
+def get_church_url(input_string, lang = 'en', separator = '\n', sort_by = None, skip_lang = False, skip_fragment = False, **kwargs):
+  references = parse_references_string(input_string, lang = lang, sort_by = sort_by)
   return separator.join([ref.church_url(skip_lang = skip_lang, skip_fragment = skip_fragment) for ref in references])
 
-def get_church_link(input_string, lang = 'en', separator = '\n', link_class = None, link_target = None, skip_book_name = False, abbreviated = False, skip_lang = False, skip_fragment = False, **kwargs):
-  references = parse_references_string(input_string, lang = lang)
+def get_church_link(input_string, lang = 'en', separator = '\n', sort_by = None, link_class = None, link_target = None, skip_book_name = False, abbreviated = False, skip_lang = False, skip_fragment = False, **kwargs):
+  references = parse_references_string(input_string, lang = lang, sort_by = sort_by)
   return separator.join([ref.church_link(link_class = link_class, link_target = link_target, skip_book_name = skip_book_name, abbreviated = abbreviated, skip_lang = skip_lang, skip_fragment = skip_fragment) for ref in references])
   
+def get_reference_objects(input_string, lang = 'en', sort_by = None, **kwargs):
+  return parse_references_string(input_string, lang = lang, sort_by = sort_by)
+
+def get_reference_attributes(input_string, lang = 'en', sort_by = None, **kwargs):
+  references = parse_references_string(input_string, lang = lang, sort_by = sort_by)
+  return [ref.attributes() for ref in references]
+
 def get_langs(**kwargs):
   return data.scriptures['languages'].keys()
 
@@ -319,3 +331,55 @@ def get_punctuation(lang = 'en', **kwargs):
 
 def get_numerals(lang = 'en', **kwargs):
   return data.scriptures['languages'][lang]['numerals']
+
+def sort_references(references, lang = 'en', sort_by = None):
+  # Sort by book order or alphabetically by label
+  if sort_by == 'traditional' or sort_by == 'label':
+    reference_tuples = []
+    book_slugs_by_book = []
+    book_slugs_by_label = []
+    chapters_by_book = {}
+    for publication_slug, publication_info in data.scriptures['structure'].items():
+      for book_slug, book_info in publication_info['books'].items():
+        chapters_by_book[book_slug] = book_info['churchChapters']
+        book_slugs_by_book.append(book_slug)
+    
+    if sort_by == 'label':
+      bcp47 = lang
+      if lang.endswith('Hant'):
+        bcp47 = 'zh-Hant'
+      elif lang.endswith('Hans'):
+        bcp47 = 'zh-Hans'
+      collation_index = icu.AlphabeticIndex(icu.Locale(bcp47 + '-u-ka-shifted')).addLabels(icu.Locale('en' + '-u-ka-shifted'))
+      for book_slug in book_slugs_by_book:
+        book_name = data.scriptures['languages'][lang]['translatedNames'].get(book_slug, {}).get('name') or book_slug
+        collation_index.addRecord(book_name or '', book_slug)
+      for (bucket_label, label_type) in collation_index:
+        while collation_index.nextRecord():
+          book_slugs_by_label.append(collation_index.recordData)
+    
+    for reference in references:
+      book_position = 0
+      chapter_position = 0
+      verse_position = 0
+      number_of_verses = 0
+      if reference.book_slug and reference.book_slug in book_slugs_by_book:
+        if sort_by == 'traditional':
+          book_position = book_slugs_by_book.index(reference.book_slug) + 1
+        elif sort_by == 'label':
+          book_position = book_slugs_by_label.index(reference.book_slug) + 1
+        
+        if reference.chapter and reference.chapter in chapters_by_book[reference.book_slug]:
+          chapter_position = (chapters_by_book[reference.book_slug].index(reference.chapter) + 1) if isinstance(reference.chapter, int) else 1000
+          if reference.verse_groups:
+            verse_position = reference.verse_groups[0][0] if isinstance(reference.verse_groups[0][0], int) else 1000
+            number_of_verses = sum([len(vg) for vg in reference.verse_groups])
+      
+      reference_tuple = (book_position, chapter_position, verse_position, number_of_verses, reference)
+      reference_tuples.append(reference_tuple)
+    sorted_reference_tuples = sorted(reference_tuples)
+    return [reference_tuple[4] for reference_tuple in sorted_reference_tuples]
+  
+  # Return original sort order
+  else:
+    return references

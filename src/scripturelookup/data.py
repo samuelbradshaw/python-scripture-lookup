@@ -3,6 +3,7 @@ import os
 import sys
 import json
 import time
+import re
 
 # Third-party libraries
 import requests
@@ -32,7 +33,7 @@ def load_data(filename):
       return json.load(f)
   else:
     download_data(filename, filepath)
-    load_data(filename)
+    return load_data(filename)
 
 # Update JSON data
 def update_data():
@@ -41,6 +42,13 @@ def update_data():
 
 languages = load_data('metadata-languages.min.json')
 scriptures = load_data('metadata-scriptures.min.json')
+
+reference_separators_pattern = r'|'.join([re.escape(s.strip()) for s in scriptures['summary']['punctuation']['referenceSeparator']] + [re.escape(';'), re.escape('\n')])
+chapter_verse_separators_pattern = r'|'.join([re.escape(s.strip()) for s in scriptures['summary']['punctuation']['chapterVerseSeparator']] + [re.escape(':')])
+verse_group_separators_pattern = r'|'.join([re.escape(s.strip()) for s in scriptures['summary']['punctuation']['verseGroupSeparator']] + [re.escape(',')])
+verse_range_separators_pattern = r'|'.join([re.escape(s.strip()) for s in scriptures['summary']['punctuation']['verseRangeSeparator']] + [re.escape('-'), re.escape('–'), re.escape('〜')])
+opening_parenthesis_pattern = r'|'.join([re.escape(s.strip()) for s in scriptures['summary']['punctuation']['openingParenthesis']] + [re.escape('(')])
+closing_parenthesis_pattern = r'|'.join([re.escape(s.strip()) for s in scriptures['summary']['punctuation']['closingParenthesis']] + [re.escape(')')])
 
 
 # Get the BCP 47 language tag for a given language code

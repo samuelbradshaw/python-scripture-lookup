@@ -5,7 +5,12 @@ Scripture Lookup is a Python library and command-line tool for looking up script
 
 ## Installation
 
-The Python package and command-line tool can be installed from [PyPI](https://pypi.org/project/scripturelookup/) via pip:
+1. Install [Python 3](https://gist.github.com/samuelbradshaw/932d48ef1eff07e288e25e4355dbce5d) and the [Homebrew](https://brew.sh) package manager (if you don’t already have them installed).
+2. Install icu4c via Homebrew:
+```
+brew install icu4c
+```
+3. Install Scripture Lookup:
 ```
 pip install scripturelookup
 ```
@@ -69,6 +74,9 @@ lookup.get_church_url('/scriptures/ot', lang = 'es')
 - **get_church_uri** – Get a Gospel Library URI (i.e. "/scriptures/bofm/hel/5.12").
 - **get_church_url** – Get a Gospel Library URL.
 - **get_church_link** – Get an HTML link to Gospel Library.
+- **get_reference_objects** – Get a list of references as objects.
+- **get_reference_attributes** – Get a list of references as dictionaries.
+- **sort_references** – Sort a list of references by label or in traditional book order.
 
 ### Inputs
 
@@ -95,13 +103,15 @@ Any of the following input types are supported. You can also provide several inp
   - https://www.churchofjesuschrist.org/study/scriptures/bofm/hel/5?id=p12&lang=eng#p12
   - https://www.churchofjesuschrist.org/study/scriptures/ot?lang=eng
   - http://lds.org/scriptures/bofm/1-ne/3.7?lang=eng
+  - [gospellibrary://content/scriptures/nt/john/3.16?lang=eng#16](https://www.churchofjesuschrist.org/study/scriptures/nt/john/3?id=p16&lang=eng#p16)
 
 ### Options
 
 Several options are available. Some are only applicable to certain commands.
 
 - **lang** (optional) – Output language. BCP 47 language codes and Gospel Library language codes are supported. Default: 'en'.
-- **separator** (optional) – String separator between outputs when a list of references is being requested. Default: '\n'.
+- **separator** (optional) – String separator between outputs when a list of references is requested. Default: '\n'.
+- **sort_by** (optional) – Method for sorting references. Default: 'none'. Supported values: 'none', 'traditional', or 'label'.
 - **source** (optional) – Content source. Default: 'python-scripture-scraper'. Supported values: 'python-scripture-scraper' or 'ChurchofJesusChrist.org'.
 - **link_class** (optional) – String for the “class” attribute on links. Default: None.
 - **link_target** (optional) – String for the “target” attribute on links. Default: None.
