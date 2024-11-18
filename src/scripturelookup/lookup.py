@@ -276,7 +276,7 @@ def parse_references_string(input_string, lang = 'en', sort_by = None):
   
   # Normalize whitespace-separated references. Example: "Genesis 1:2 1 Nephi 3:7" –> "; Genesis 1:2 ; 1 Nephi 3:7"
   scripture_book_names_pattern = '|'.join([re.escape(sbn) for sbn in scripture_book_names_without_commas])
-  input_string = re.sub(rf'\b({scripture_book_names_pattern})', r'; \1', input_string, flags=re.IGNORECASE)
+  input_string = re.sub(rf'(?:^|[^\-])\b({scripture_book_names_pattern})', r'; \1', input_string, flags=re.IGNORECASE)
   
   # Normalize lists and ranges. Example: "Genesis 12:1, 2, and 3; verses 1 and 4; John 2 through 7" –> "Genesis 12:1, 2,,3; verses 1,4; John 2–7"
   input_string = re.sub(r'\s+(?:and|y|e|et|&)\s+(\d+)', r',\1', input_string)
