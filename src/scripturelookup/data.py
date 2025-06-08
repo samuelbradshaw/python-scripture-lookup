@@ -55,7 +55,7 @@ for key, value in scriptures['mapToSlug'].items():
   normalized_key = normalize_for_compare(key)
   scriptures['mapToSlugNormalized'][normalized_key] = value
 
-reference_separators_pattern = r'|'.join([re.escape(s.strip()) for s in scriptures['summary']['punctuation']['referenceSeparator']] + [re.escape(';'), re.escape('\n')])
+reference_separators_pattern = r'|'.join([re.escape(s.strip()) for s in scriptures['summary']['punctuation']['referenceSeparator']] + [re.escape(';'), re.escape('|'), re.escape('•'), re.escape('\n')])
 chapter_verse_separators_pattern = r'|'.join([re.escape(s.strip()) for s in scriptures['summary']['punctuation']['chapterVerseSeparator']] + [re.escape(':')])
 verse_group_separators_pattern = r'|'.join([re.escape(s.strip()) for s in scriptures['summary']['punctuation']['verseGroupSeparator']] + [re.escape(',')])
 verse_range_separators_pattern = r'|'.join([re.escape(s.strip()) for s in scriptures['summary']['punctuation']['verseRangeSeparator']] + [re.escape('-'), re.escape('–'), re.escape('〜')])
