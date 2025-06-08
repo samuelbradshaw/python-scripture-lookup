@@ -4,6 +4,7 @@ import sys
 import json
 import time
 import re
+import unicodedata
 
 # Third-party libraries
 import requests
@@ -40,8 +41,19 @@ def update_data():
   for filename in ('metadata-languages.min.json', 'metadata-scriptures.min.json',):
     download_data(filename, os.path.join(data_directory, filename))
 
+# Normalize text by removing anything that's not a letter or number, and converting to lowercase. This allows for a fuzzy comparison between input text and a known list of values.
+def normalize_for_compare(text):
+  decomposed_text = unicodedata.normalize('NFKD', text)
+  normalized_text = ''.join([c for c in decomposed_text if unicodedata.category(c)[0] in ['L', 'N']]).lower()
+  return normalized_text
+
 languages = load_data('metadata-languages.min.json')
 scriptures = load_data('metadata-scriptures.min.json')
+
+scriptures['mapToSlugNormalized'] = {}
+for key, value in scriptures['mapToSlug'].items():
+  normalized_key = normalize_for_compare(key)
+  scriptures['mapToSlugNormalized'][normalized_key] = value
 
 reference_separators_pattern = r'|'.join([re.escape(s.strip()) for s in scriptures['summary']['punctuation']['referenceSeparator']] + [re.escape(';'), re.escape('\n')])
 chapter_verse_separators_pattern = r'|'.join([re.escape(s.strip()) for s in scriptures['summary']['punctuation']['chapterVerseSeparator']] + [re.escape(':')])

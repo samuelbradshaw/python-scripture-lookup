@@ -120,6 +120,7 @@ Several options are available. Some are only applicable to certain commands.
 - **skip_fragment** (optional) – Whether fragments should be skipped on URLs. Default: False.
 - **skip_book_name** (optional) – Whether book names should be skipped on labels. Default: False.
 - **abbreviated** (optional) – Whether book abbrevions should be used on labels. Default: False.
+- **skip_cleanup** (optional) – Whether cleanup of the input string should be skipped when parsing. Can be used to speed up parsing if the input string is guaranteed to have well-formed references. Default: False.
 
 
 ## Acknowledgements

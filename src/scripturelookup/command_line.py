@@ -19,6 +19,7 @@ def main_cli():
   parser.add_argument('--skip_fragment', action='store_true', help='Skip #frament in URLs.')
   parser.add_argument('--skip_book_name', action='store_true', help='Skip scripture book name in labels.')
   parser.add_argument('--abbreviated', action='store_true', help='Prefer abbreviated scripture book name in labels.')
+  parser.add_argument('--skip_cleanup', action='store_true', help='Skip cleanup of the input string for faster parsing.')
   
   args = parser.parse_args()
   
@@ -36,6 +37,7 @@ def main_cli():
     skip_fragment = args.skip_fragment,
     skip_book_name = args.skip_book_name,
     abbreviated = args.abbreviated,
+    skip_cleanup = args.skip_cleanup,
   )
   
   print(result)

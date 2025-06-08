@@ -1,7 +1,6 @@
 # Python standard libraries
 import sys
 import re
-import unicodedata
 
 # Third-party libraries
 import icu
@@ -166,13 +165,6 @@ class Reference:
     return 0 < 1
 
 
-# Normalize text by removing anything that's not a letter or number, and converting to lowercase. This allows for a fuzzy comparison between input text and a known list of values.
-def normalizeForCompare(text):
-  decomposed_text = unicodedata.normalize('NFKD', text)
-  normalized_text = ''.join([c for c in decomposed_text if unicodedata.category(c)[0] in ['L', 'N']]).lower()
-  return normalized_text
-
-
 # Parse verses into verse groups
 # Example: '1-2,5-7,9' –> [[1, 2], [5, 6, 7], [9]]
 def parse_verses_string(verses_string, lang = 'en'):
@@ -239,72 +231,75 @@ def convert_verse_groups_to_string(verse_groups, verse_range_separator, verse_gr
 
 
 # Parse one or more scripture references, URIs, URLs, or slugs
-def parse_references_string(input_string, lang = 'en', sort_by = None):
+# The script will run faster if skip_cleanup is True, but all scripture references or URIs will be expected to have consistent formatting
+def parse_references_string(input_string, lang = 'en', sort_by = None, skip_cleanup = False):
   lang = data.get_bcp47(lang)
   
   # Remove leading or trailing whitespace and punctuation
   punctuation_to_strip = ''.join(data.scriptures['summary']['punctuation']['referenceSeparator'] + data.scriptures['summary']['punctuation']['verseGroupSeparator'] + data.scriptures['summary']['punctuation']['verseRangeSeparator']) + '(;,.'
-  input_string = input_string.strip().strip(punctuation_to_strip).rstrip(':').strip()
   
-  # If language is English, replace roman numerals with numbers. Example: 'II Corinthians" –> "2 Corinthians"
-  if lang == 'en':
-    input_string = re.sub(r'\bi\s', '1', input_string, flags=re.IGNORECASE)
-    input_string = re.sub(r'\bii\s', '2', input_string, flags=re.IGNORECASE)
-    input_string = re.sub(r'\biii\s', '3', input_string, flags=re.IGNORECASE)
-    input_string = re.sub(r'\biv\s', '4', input_string, flags=re.IGNORECASE)
-  
-  # Remove commas from book names so further normalization doesn't try to split it into two references. Example: "JST, Genesis 1" –> "JST Genesis 1"
-  input_string = input_string.replace('\xa0', ' ')
-  scripture_book_names = set()
-  scripture_book_names_without_commas = []
-  for volume_data in data.scriptures['structure'].values():
-    for book_slug in volume_data['books'].keys():
-      book_info = data.scriptures['languages'][lang]['translatedNames'].get(book_slug)
-      if book_info:
-        book_name = (book_info.get('name') or '').replace('\xa0', ' ')
-        if book_name:
-          scripture_book_names.add(book_name)
-        book_abbrev = (book_info.get('abbrev') or '').replace('\xa0', ' ')
-        if book_abbrev:
-          scripture_book_names.add(book_abbrev)
-  scripture_book_names = sorted(scripture_book_names, key=lambda x: (-len(x), x))
-  for scripture_book_name in scripture_book_names:
-    scripture_book_name_without_comma = re.sub(data.verse_group_separators_pattern, '', scripture_book_name)
-    scripture_book_names_without_commas.append(scripture_book_name_without_comma)
-    if scripture_book_name in input_string and re.search(data.verse_group_separators_pattern, scripture_book_name):
-      input_string = input_string.replace(scripture_book_name, scripture_book_name_without_comma)
-  
-  # Normalize whitespace-separated references. Example: "Genesis 1:2 1 Nephi 3:7" –> "; Genesis 1:2 ; 1 Nephi 3:7"
-  scripture_book_names_pattern = '|'.join([re.escape(sbn) for sbn in scripture_book_names_without_commas])
-  input_string = re.sub(rf'(?:^|[^\-])\b({scripture_book_names_pattern})', r'; \1', input_string, flags=re.IGNORECASE)
-  
-  # Normalize lists and ranges. Example: "Genesis 12:1, 2, and 3; verses 1 and 4; John 2 through 7" –> "Genesis 12:1, 2,,3; verses 1,4; John 2–7"
-  input_string = re.sub(r'\s+(?:and|y|e|et|&)\s+(\d+)', r',\1', input_string)
-  input_string = re.sub(r'\s+(?:through|thru|to|al|a|à)\s+(\d+)', r'–\1', input_string)
-  
-  # Normalize verse sets. Example: "chapter 3 verse 7; vv. 3, 6" –> "chapter 3:7; :3, 6"
-  input_string = re.sub(r'(?:^|\s)(?:verses|verse|vv\.|v\.|versículos|versículo|versets|verset)\s(\d+)', r':\1', input_string).replace('::', ':')
-  
-  # Normalize chapter sets. Example: "Genesis 1, 2, 4–5, Exodus 10; Alma 32" –> "Genesis 1; 2; 4–5; Exodus 10; Alma 32"
-  if re.search(data.verse_group_separators_pattern, input_string) and not re.search(data.chapter_verse_separators_pattern, input_string):
-    input_string = re.sub(rf'(?:{data.verse_group_separators_pattern})+', ';', input_string)
-  
-  # Normalize chapter:verse sets. Example: "Genesis 6:7a, 6:13a, 15; 1 Nephi 3:7 (twice), 8:21" –> "Genesis 6:7a; 6:13a, 15; 1 Nephi 3:7 (twice); 8:21"
-  if re.search(data.chapter_verse_separators_pattern, input_string):
-    references_list = re.split(data.reference_separators_pattern, input_string)
-    new_references_list = []
-    for reference in references_list:
-      reference_parts = re.split(data.verse_group_separators_pattern, reference)
-      reference_input_string = ''
-      for part in reference_parts:
-        if reference_input_string == '':
-          reference_input_string += part
-        elif re.search(data.chapter_verse_separators_pattern, part):
-          reference_input_string += ';' + part
-        else:
-          reference_input_string += ',' + part
-      new_references_list.append(reference_input_string)
-    input_string = ';'.join(new_references_list)
+  if not skip_cleanup:
+    input_string = input_string.strip().strip(punctuation_to_strip).rstrip(':').strip()
+    
+    # If language is English, replace roman numerals with numbers. Example: 'II Corinthians" –> "2 Corinthians"
+    if lang == 'en':
+      input_string = re.sub(r'\bi\s', '1', input_string, flags=re.IGNORECASE)
+      input_string = re.sub(r'\bii\s', '2', input_string, flags=re.IGNORECASE)
+      input_string = re.sub(r'\biii\s', '3', input_string, flags=re.IGNORECASE)
+      input_string = re.sub(r'\biv\s', '4', input_string, flags=re.IGNORECASE)
+    
+    # Remove commas from book names so further normalization doesn't try to split it into two references. Example: "JST, Genesis 1" –> "JST Genesis 1"
+    input_string = input_string.replace('\xa0', ' ')
+    scripture_book_names = set()
+    scripture_book_names_without_commas = []
+    for volume_data in data.scriptures['structure'].values():
+      for book_slug in volume_data['books'].keys():
+        book_info = data.scriptures['languages'][lang]['translatedNames'].get(book_slug)
+        if book_info:
+          book_name = (book_info.get('name') or '').replace('\xa0', ' ')
+          if book_name:
+            scripture_book_names.add(book_name)
+          book_abbrev = (book_info.get('abbrev') or '').replace('\xa0', ' ')
+          if book_abbrev:
+            scripture_book_names.add(book_abbrev)
+    scripture_book_names = sorted(scripture_book_names, key=lambda x: (-len(x), x))
+    for scripture_book_name in scripture_book_names:
+      scripture_book_name_without_comma = re.sub(data.verse_group_separators_pattern, '', scripture_book_name)
+      scripture_book_names_without_commas.append(scripture_book_name_without_comma)
+      if scripture_book_name in input_string and re.search(data.verse_group_separators_pattern, scripture_book_name):
+        input_string = input_string.replace(scripture_book_name, scripture_book_name_without_comma)
+    
+    # Normalize whitespace-separated references. Example: "Genesis 1:2 1 Nephi 3:7" –> "; Genesis 1:2 ; 1 Nephi 3:7"
+    scripture_book_names_pattern = '|'.join([re.escape(sbn) for sbn in scripture_book_names_without_commas])
+    input_string = re.sub(rf'(?:^|[^\-])\b({scripture_book_names_pattern})', r'; \1', input_string, flags=re.IGNORECASE)
+    
+    # Normalize lists and ranges. Example: "Genesis 12:1, 2, and 3; verses 1 and 4; John 2 through 7" –> "Genesis 12:1, 2,,3; verses 1,4; John 2–7"
+    input_string = re.sub(r'\s+(?:and|y|e|et|&)\s+(\d+)', r',\1', input_string)
+    input_string = re.sub(r'\s+(?:through|thru|to|al|a|à)\s+(\d+)', r'–\1', input_string)
+    
+    # Normalize verse sets. Example: "chapter 3 verse 7; vv. 3, 6" –> "chapter 3:7; :3, 6"
+    input_string = re.sub(r'(?:^|\s)(?:verses|verse|vv\.|v\.|versículos|versículo|versets|verset)\s(\d+)', r':\1', input_string).replace('::', ':')
+    
+    # Normalize chapter sets. Example: "Genesis 1, 2, 4–5, Exodus 10; Alma 32" –> "Genesis 1; 2; 4–5; Exodus 10; Alma 32"
+    if re.search(data.verse_group_separators_pattern, input_string) and not re.search(data.chapter_verse_separators_pattern, input_string):
+      input_string = re.sub(rf'(?:{data.verse_group_separators_pattern})+', ';', input_string)
+    
+    # Normalize chapter:verse sets. Example: "Genesis 6:7a, 6:13a, 15; 1 Nephi 3:7 (twice), 8:21" –> "Genesis 6:7a; 6:13a, 15; 1 Nephi 3:7 (twice); 8:21"
+    if re.search(data.chapter_verse_separators_pattern, input_string):
+      references_list = re.split(data.reference_separators_pattern, input_string)
+      new_references_list = []
+      for reference in references_list:
+        reference_parts = re.split(data.verse_group_separators_pattern, reference)
+        reference_input_string = ''
+        for part in reference_parts:
+          if reference_input_string == '':
+            reference_input_string += part
+          elif re.search(data.chapter_verse_separators_pattern, part):
+            reference_input_string += ';' + part
+          else:
+            reference_input_string += ',' + part
+        new_references_list.append(reference_input_string)
+      input_string = ';'.join(new_references_list)
   
   input_list = re.split(data.reference_separators_pattern, input_string)
   
@@ -317,11 +312,12 @@ def parse_references_string(input_string, lang = 'en', sort_by = None):
     if not input_string:
       continue
     
-    # Remove trailing text. Example: "1 John 3:2 2" –> "1 John 3:2"
-    trailing_text_match = re.match(rf'^.*?\d((?:\:|{data.closing_parenthesis_pattern})?\s+[^{data.opening_parenthesis_pattern}|\s]+)$', input_string)
-    if trailing_text_match:
-      trailing_text_string = trailing_text_match.group(1)
-      input_string = input_string.removesuffix(trailing_text_string)
+    if not skip_cleanup:
+      # Remove trailing text. Example: "1 John 3:2 2" –> "1 John 3:2"
+      trailing_text_match = re.match(rf'^.*?\d((?:\:|{data.closing_parenthesis_pattern})?\s+[^{data.opening_parenthesis_pattern}|\s]+)$', input_string)
+      if trailing_text_match:
+        trailing_text_string = trailing_text_match.group(1)
+        input_string = input_string.removesuffix(trailing_text_string)
     
     verses_string = None
     context_verses_string = None
@@ -389,12 +385,7 @@ def parse_references_string(input_string, lang = 'en', sort_by = None):
     book_slug = None
     skip_book_name = False
     if book_string:
-      book_slug = data.scriptures['mapToSlug'].get(book_string, None)
-      if not book_slug:
-        for key, value in data.scriptures['mapToSlug'].items():
-          if normalizeForCompare(book_string) == normalizeForCompare(key):
-            book_slug = value
-            break
+      book_slug = data.scriptures['mapToSlug'].get(book_string, None) or data.scriptures['mapToSlugNormalized'].get(data.normalize_for_compare(book_string), None)
       # Special handling for Abraham facsimiles
       if book_slug == 'facsimiles' or (not book_slug and 'fac' in book_string.lower()):
         if previous_book_slug == 'abraham' and not previous_chapter:
@@ -442,31 +433,31 @@ def parse_references_string(input_string, lang = 'en', sort_by = None):
 
 # Functions that can be called via Python or from the command line (see README.md for more information)
 
-def get_content(input_string, lang = 'en', separator = '\n', source = 'python-scripture-scraper', **kwargs):
-  references = parse_references_string(input_string, lang = lang)
+def get_content(input_string, lang = 'en', separator = '\n', source = 'python-scripture-scraper', skip_cleanup = False, **kwargs):
+  references = parse_references_string(input_string, lang = lang, skip_cleanup = skip_cleanup)
   return separator.join([ref.content(source = source) for ref in references])
 
-def get_label(input_string, lang = 'en', separator = '\n', sort_by = None, skip_book_name = False, abbreviated = False, **kwargs):
-  references = parse_references_string(input_string, lang = lang, sort_by = sort_by)
+def get_label(input_string, lang = 'en', separator = '\n', sort_by = None, skip_book_name = False, abbreviated = False, skip_cleanup = False, **kwargs):
+  references = parse_references_string(input_string, lang = lang, sort_by = sort_by, skip_cleanup = skip_cleanup)
   return separator.join([ref.label(skip_book_name = skip_book_name, abbreviated = abbreviated) for ref in references])
 
-def get_church_uri(input_string, separator = '\n', sort_by = None, use_query_parameters = False, **kwargs):
-  references = parse_references_string(input_string, lang = lang, sort_by = sort_by)
+def get_church_uri(input_string, separator = '\n', sort_by = None, use_query_parameters = False, skip_cleanup = False, **kwargs):
+  references = parse_references_string(input_string, lang = lang, sort_by = sort_by, skip_cleanup = skip_cleanup)
   return separator.join([ref.church_uri(use_query_parameters = use_query_parameters) for ref in references])
 
-def get_church_url(input_string, lang = 'en', separator = '\n', sort_by = None, skip_lang = False, skip_fragment = False, **kwargs):
-  references = parse_references_string(input_string, lang = lang, sort_by = sort_by)
+def get_church_url(input_string, lang = 'en', separator = '\n', sort_by = None, skip_lang = False, skip_fragment = False, skip_cleanup = False, **kwargs):
+  references = parse_references_string(input_string, lang = lang, sort_by = sort_by, skip_cleanup = skip_cleanup)
   return separator.join([ref.church_url(skip_lang = skip_lang, skip_fragment = skip_fragment) for ref in references])
 
-def get_church_link(input_string, lang = 'en', separator = '\n', sort_by = None, link_class = None, link_target = None, skip_book_name = False, abbreviated = False, skip_lang = False, skip_fragment = False, **kwargs):
-  references = parse_references_string(input_string, lang = lang, sort_by = sort_by)
+def get_church_link(input_string, lang = 'en', separator = '\n', sort_by = None, link_class = None, link_target = None, skip_book_name = False, abbreviated = False, skip_lang = False, skip_fragment = False, skip_cleanup = False, **kwargs):
+  references = parse_references_string(input_string, lang = lang, sort_by = sort_by, skip_cleanup = skip_cleanup)
   return separator.join([ref.church_link(link_class = link_class, link_target = link_target, skip_book_name = skip_book_name, abbreviated = abbreviated, skip_lang = skip_lang, skip_fragment = skip_fragment) for ref in references])
   
-def get_reference_objects(input_string, lang = 'en', sort_by = None, **kwargs):
-  return parse_references_string(input_string, lang = lang, sort_by = sort_by)
+def get_reference_objects(input_string, lang = 'en', sort_by = None, skip_cleanup = False, **kwargs):
+  return parse_references_string(input_string, lang = lang, sort_by = sort_by, skip_cleanup = skip_cleanup)
 
-def get_reference_attributes(input_string, lang = 'en', sort_by = None, **kwargs):
-  references = parse_references_string(input_string, lang = lang, sort_by = sort_by)
+def get_reference_attributes(input_string, lang = 'en', sort_by = None, skip_cleanup = False, **kwargs):
+  references = parse_references_string(input_string, lang = lang, sort_by = sort_by, skip_cleanup = skip_cleanup)
   return [ref.attributes() for ref in references]
 
 def get_langs(**kwargs):
