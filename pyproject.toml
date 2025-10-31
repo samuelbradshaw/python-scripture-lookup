@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "scripturelookup"
 authors = [
-    {name = "Samuel Bradshaw", email = "samuel.h.bradshaw@gmail.com"},
+  {name = "Samuel Bradshaw", email = "samuel.h.bradshaw@gmail.com"},
 ]
 description = "Python and command-line utility for converting scripture references between formats."
 readme = "README.md"
@@ -18,7 +18,9 @@ classifiers = [
 requires-python = ">=3.8"
 dynamic = ["version"]
 dependencies = [
-    "requests",
+  "requests",
+  "beautifulsoup4",
+  "PyICU",
 ]
 
 [project.urls]

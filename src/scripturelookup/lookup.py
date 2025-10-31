@@ -195,12 +195,15 @@ def parse_verses_string(verses_string, lang = 'en'):
   
   if all_verses_are_integers:
     verses = sorted(unique_verses)
-  else:
+  elif hasattr(icu, 'Collator'):
+    # TODO: On Windows, getting the collator fails with "AttributeError: module 'icu' has no attribute 'Collator'"
     if lang not in natural_sort_collators:
       natural_sort_collators[lang] = icu.Collator.createInstance(icu.Locale(lang))
       natural_sort_collators[lang].setAttribute(icu.UCollAttribute.NUMERIC_COLLATION, icu.UCollAttributeValue.ON)
     verses = sorted([str(v) for v in unique_verses], key=natural_sort_collators[lang].getSortKey)
     verses = [numbers.convert_number_to_int(v) for v in verses]
+  else:
+    verses = sorted([str(v) for v in unique_verses])
   
   verse_groups = []
   previous_verse = -1
