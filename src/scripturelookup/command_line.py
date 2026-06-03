@@ -20,6 +20,7 @@ def main_cli():
   parser.add_argument('--skip_book_name', action='store_true', help='Skip scripture book name in labels.')
   parser.add_argument('--abbreviated', action='store_true', help='Prefer abbreviated scripture book name in labels.')
   parser.add_argument('--skip_cleanup', action='store_true', help='Skip cleanup of the input string for faster parsing.')
+  parser.add_argument('--range_split_limit', type=int, help='Threshold where a range of sequential verses will be split into separate verse groups. Default: 1.')
   
   args = parser.parse_args()
   
@@ -38,6 +39,7 @@ def main_cli():
     skip_book_name = args.skip_book_name,
     abbreviated = args.abbreviated,
     skip_cleanup = args.skip_cleanup,
+    range_split_limit = args.range_split_limit or 1,
   )
   
   print(result)

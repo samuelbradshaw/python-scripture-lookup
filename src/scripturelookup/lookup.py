@@ -167,7 +167,7 @@ class Reference:
 
 # Parse verses into verse groups
 # Example: '1-2,5-7,9' –> [[1, 2], [5, 6, 7], [9]]
-def parse_verses_string(verses_string, lang = 'en'):
+def parse_verses_string(verses_string, lang = 'en', range_split_limit = 1):
   verses_string = (verses_string or '').replace('p', '').strip()
   if not verses_string:
     return None
@@ -217,7 +217,19 @@ def parse_verses_string(verses_string, lang = 'en'):
     else:
       verse_groups.append([verse])
       previous_verse = -1
-  return verse_groups
+  
+  # Split ranges at range split limit. Examples:
+  # [[2], [2, 3, 4], [2, 3]], limit 1 –> [[2], [2, 3, 4], [2, 3]]
+  # [[2], [2, 3, 4], [2, 3]], limit 2 –> [[2], [2, 3, 4], [2], [3]]
+  # [[2], [2, 3, 4], [2, 3]], limit 3 –> [[2], [2], [3], [4], [2], [3]]
+  refined_verse_groups = []
+  for group in verse_groups:
+    if len(group) <= range_split_limit:
+      refined_verse_groups.extend([v] for v in group)
+    else:
+      refined_verse_groups.append(group)
+  
+  return refined_verse_groups
 
 
 # Format verse groups to a localized string
@@ -235,7 +247,7 @@ def convert_verse_groups_to_string(verse_groups, verse_range_separator, verse_gr
 
 # Parse one or more scripture references, URIs, URLs, or slugs
 # The script will run faster if skip_cleanup is True, but all scripture references or URIs will be expected to have consistent formatting
-def parse_references_string(input_string, lang = 'en', sort_by = None, skip_cleanup = False):
+def parse_references_string(input_string, lang = 'en', sort_by = None, skip_cleanup = False, range_split_limit = 1):
   lang = data.get_bcp47(lang)
   
   # Remove leading or trailing whitespace and punctuation
@@ -382,8 +394,8 @@ def parse_references_string(input_string, lang = 'en', sort_by = None, skip_clea
         chapter_string = chapter_match.group(1)
         book_string = book_string.removesuffix(chapter_string).strip()
     
-    verse_groups = parse_verses_string(verses_string)
-    context_verse_groups = parse_verses_string(context_verses_string)
+    verse_groups = parse_verses_string(verses_string, range_split_limit = range_split_limit)
+    context_verse_groups = parse_verses_string(context_verses_string, range_split_limit = range_split_limit)
     chapter = numbers.convert_number_to_int(chapter_string)
     book_slug = None
     skip_book_name = False
@@ -436,31 +448,31 @@ def parse_references_string(input_string, lang = 'en', sort_by = None, skip_clea
 
 # Functions that can be called via Python or from the command line (see README.md for more information)
 
-def get_content(input_string, lang = 'en', separator = '\n', source = 'python-scripture-scraper', skip_cleanup = False, **kwargs):
-  references = parse_references_string(input_string, lang = lang, skip_cleanup = skip_cleanup)
+def get_content(input_string, lang = 'en', separator = '\n', source = 'python-scripture-scraper', skip_cleanup = False, range_split_limit = 1, **kwargs):
+  references = parse_references_string(input_string, lang = lang, skip_cleanup = skip_cleanup, range_split_limit = range_split_limit)
   return separator.join([ref.content(source = source) for ref in references])
 
-def get_label(input_string, lang = 'en', separator = '\n', sort_by = None, skip_book_name = False, abbreviated = False, skip_cleanup = False, **kwargs):
-  references = parse_references_string(input_string, lang = lang, sort_by = sort_by, skip_cleanup = skip_cleanup)
+def get_label(input_string, lang = 'en', separator = '\n', sort_by = None, skip_book_name = False, abbreviated = False, skip_cleanup = False, range_split_limit = 1, **kwargs):
+  references = parse_references_string(input_string, lang = lang, sort_by = sort_by, skip_cleanup = skip_cleanup, range_split_limit = range_split_limit)
   return separator.join([ref.label(skip_book_name = skip_book_name, abbreviated = abbreviated) for ref in references])
 
-def get_church_uri(input_string, separator = '\n', sort_by = None, use_query_parameters = False, skip_cleanup = False, **kwargs):
-  references = parse_references_string(input_string, lang = lang, sort_by = sort_by, skip_cleanup = skip_cleanup)
+def get_church_uri(input_string, separator = '\n', sort_by = None, use_query_parameters = False, skip_cleanup = False, range_split_limit = 1, **kwargs):
+  references = parse_references_string(input_string, lang = lang, sort_by = sort_by, skip_cleanup = skip_cleanup, range_split_limit = range_split_limit)
   return separator.join([ref.church_uri(use_query_parameters = use_query_parameters) for ref in references])
 
-def get_church_url(input_string, lang = 'en', separator = '\n', sort_by = None, skip_lang = False, skip_fragment = False, skip_cleanup = False, **kwargs):
-  references = parse_references_string(input_string, lang = lang, sort_by = sort_by, skip_cleanup = skip_cleanup)
+def get_church_url(input_string, lang = 'en', separator = '\n', sort_by = None, skip_lang = False, skip_fragment = False, skip_cleanup = False, range_split_limit = 1, **kwargs):
+  references = parse_references_string(input_string, lang = lang, sort_by = sort_by, skip_cleanup = skip_cleanup, range_split_limit = range_split_limit)
   return separator.join([ref.church_url(skip_lang = skip_lang, skip_fragment = skip_fragment) for ref in references])
 
-def get_church_link(input_string, lang = 'en', separator = '\n', sort_by = None, link_class = None, link_target = None, skip_book_name = False, abbreviated = False, skip_lang = False, skip_fragment = False, skip_cleanup = False, **kwargs):
-  references = parse_references_string(input_string, lang = lang, sort_by = sort_by, skip_cleanup = skip_cleanup)
+def get_church_link(input_string, lang = 'en', separator = '\n', sort_by = None, link_class = None, link_target = None, skip_book_name = False, abbreviated = False, skip_lang = False, skip_fragment = False, skip_cleanup = False, range_split_limit = 1, **kwargs):
+  references = parse_references_string(input_string, lang = lang, sort_by = sort_by, skip_cleanup = skip_cleanup, range_split_limit = range_split_limit)
   return separator.join([ref.church_link(link_class = link_class, link_target = link_target, skip_book_name = skip_book_name, abbreviated = abbreviated, skip_lang = skip_lang, skip_fragment = skip_fragment) for ref in references])
   
-def get_reference_objects(input_string, lang = 'en', sort_by = None, skip_cleanup = False, **kwargs):
-  return parse_references_string(input_string, lang = lang, sort_by = sort_by, skip_cleanup = skip_cleanup)
+def get_reference_objects(input_string, lang = 'en', sort_by = None, skip_cleanup = False, range_split_limit = 1, **kwargs):
+  return parse_references_string(input_string, lang = lang, sort_by = sort_by, skip_cleanup = skip_cleanup, range_split_limit = range_split_limit)
 
-def get_reference_attributes(input_string, lang = 'en', sort_by = None, skip_cleanup = False, **kwargs):
-  references = parse_references_string(input_string, lang = lang, sort_by = sort_by, skip_cleanup = skip_cleanup)
+def get_reference_attributes(input_string, lang = 'en', sort_by = None, skip_cleanup = False, range_split_limit = 1, **kwargs):
+  references = parse_references_string(input_string, lang = lang, sort_by = sort_by, skip_cleanup = skip_cleanup, range_split_limit = range_split_limit)
   return [ref.attributes() for ref in references]
 
 def get_langs(**kwargs):
