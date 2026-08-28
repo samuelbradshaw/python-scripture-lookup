@@ -37,10 +37,12 @@ def load_data(filename):
     download_data(filename, filepath)
     return load_data(filename)
 
-# Update JSON data
+# Update JSON data. Returns the names of the files that were downloaded.
 def update_data():
-  for filename in ('metadata-languages.min.json', 'metadata-scriptures.min.json',):
+  filenames = ('metadata-languages.min.json', 'metadata-scriptures.min.json',)
+  for filename in filenames:
     download_data(filename, os.path.join(data_directory, filename))
+  return filenames
 
 # Normalize text by removing anything that's not a letter or number, and converting to lowercase. This allows for a fuzzy comparison between input text and a known list of values.
 def normalize_for_compare(text):

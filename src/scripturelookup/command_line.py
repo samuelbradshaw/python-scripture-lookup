@@ -1,13 +1,14 @@
 # Python standard libraries
 import argparse
+import inspect
 
 # Internal imports
-from . import data, numbers, lookup
+from . import lookup
 
 def main_cli():
   parser = argparse.ArgumentParser(description='Scripture lookup')
   parser.add_argument('command', help='Command to run. Required.')
-  parser.add_argument('input', help='Input text to parse (one or more references).')
+  parser.add_argument('input', nargs='?', default='', help='Input text to parse (one or more references). Not needed for commands that don’t take input, such as refresh_metadata.')
   parser.add_argument('--lang', help='Output language. Default: "en".')
   parser.add_argument('--separator', help='Separator when there are multiple results. Default: "\n".')
   parser.add_argument('--sort-by', help='Sort the returned references ("none", "traditional", or "label"). Default: "none".')
@@ -24,9 +25,16 @@ def main_cli():
   
   args = parser.parse_args()
   
-  command = getattr(lookup, args.command)
-  result = command(
-    args.input,
+  command = getattr(lookup, args.command, None)
+  if not callable(command) or args.command.startswith('_'):
+    parser.error(f'Unknown command: “{args.command}”. See README.md for the list of commands.')
+
+  # Some commands (refresh_metadata, get_langs, get_punctuation, get_numerals) don't take input text
+  command_takes_input = 'input_string' in inspect.signature(command).parameters
+  if command_takes_input and not args.input:
+    parser.error(f'The “{args.command}” command needs input text.')
+
+  options = dict(
     lang = args.lang or 'en',
     separator = args.separator or '\n',
     sort_by = args.sort_by,
@@ -41,5 +49,6 @@ def main_cli():
     skip_cleanup = args.skip_cleanup,
     range_split_limit = args.range_split_limit or 1,
   )
-  
+  result = command(args.input, **options) if command_takes_input else command(**options)
+
   print(result)

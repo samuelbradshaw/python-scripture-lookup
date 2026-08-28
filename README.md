@@ -1,6 +1,6 @@
 # Scripture Lookup
 
-Scripture Lookup is a Python library and command-line tool for looking up scripture verses or chapters. It can also convert scripture references between formats and languages. The tool is built around data from [Python Scripture Scraper](https://github.com/samuelbradshaw/python-scripture-scraper).
+Scripture Lookup is a Python library and command-line tool for looking up scripture verses or chapters. It can also detect scripture references in a string, and convert them between formats and languages. The tool uses scripture and language metadata from [Python Scripture Scraper](https://github.com/samuelbradshaw/python-scripture-scraper).
 
 
 ## Installation
@@ -42,6 +42,9 @@ https://www.churchofjesuschrist.org/study/scriptures/ot?lang=spa
 
 % scripturelookup detect_references "As Nephi taught in 1 Ne. 3:7, and again in 2 Nephi 2:25."
 [['1 Ne. 3:7', 19, 28], ['2 Nephi 2:25', 43, 55]]
+
+% scripturelookup refresh_metadata
+Updated metadata: metadata-languages.min.json, metadata-scriptures.min.json
 ```
 
 
@@ -68,6 +71,9 @@ lookup.get_church_url('/scriptures/ot', lang = 'es')
 
 lookup.detect_references('As Nephi taught in 1 Ne. 3:7, and again in 2 Nephi 2:25.')
 # [['1 Ne. 3:7', 19, 28], ['2 Nephi 2:25', 43, 55]]
+
+lookup.refresh_metadata()
+# Updated metadata: metadata-languages.min.json, metadata-scriptures.min.json
 ```
 
 
@@ -84,6 +90,7 @@ lookup.detect_references('As Nephi taught in 1 Ne. 3:7, and again in 2 Nephi 2:2
 - **get_reference_attributes** – Get a list of references as dictionaries.
 - **sort_references** – Sort a list of references by label or in traditional book order.
 - **detect_references** – Find scripture references embedded in a string of text.
+- **refresh_metadata** – Download the latest scripture and language metadata. Takes no input.
 
 ### Inputs
 

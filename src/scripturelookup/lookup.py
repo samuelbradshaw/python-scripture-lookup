@@ -608,6 +608,11 @@ def get_reference_attributes(input_string, lang = 'en', sort_by = None, skip_cle
   references = parse_references_string(input_string, lang = lang, sort_by = sort_by, skip_cleanup = skip_cleanup, range_split_limit = range_split_limit)
   return [ref.attributes() for ref in references]
 
+# Download the latest scripture and language metadata. Metadata that's already been loaded stays in memory, so the new data is used from the next run onward.
+def refresh_metadata(**kwargs):
+  filenames = data.update_data()
+  return 'Updated metadata: ' + ', '.join(filenames)
+
 def get_langs(**kwargs):
   return data.scriptures['languages'].keys()
 
