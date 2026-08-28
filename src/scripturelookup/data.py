@@ -47,20 +47,76 @@ def normalize_for_compare(text):
   normalized_text = ''.join([c for c in decomposed_text if unicodedata.category(c)[0] in ['L', 'N']]).lower()
   return normalized_text
 
+# Words that can appear in a scripture reference, by language. Longer words should come before shorter words that they start with, so that (for example) "chapters" is matched before "chapter".
+reference_words = {
+  'en': {
+    'list_conjunctions': ['and', '&'],
+    'range_conjunctions': ['through', 'thru', 'to'],
+    'verse_words': ['verses', 'verse', 'vv.', 'v.'],
+    'chapter_words': ['chapters', 'chapter', 'chs.', 'ch.'],
+  },
+  'es': {
+    'list_conjunctions': ['y', 'e'],
+    'range_conjunctions': ['a', 'al'],
+    'verse_words': ['versículos', 'versículo'],
+    'chapter_words': ['capítulos', 'capítulo'],
+  },
+  'fr': {
+    'list_conjunctions': ['et'],
+    'range_conjunctions': ['à'],
+    'verse_words': ['versets', 'verset'],
+    'chapter_words': ['chapitres', 'chapitre'],
+  },
+  'pt': {
+    'list_conjunctions': ['e'],
+    'range_conjunctions': ['a'],
+    'verse_words': ['versículos', 'versículo'],
+    'chapter_words': ['capítulos', 'capítulo'],
+  },
+}
+reference_word_keys = ('list_conjunctions', 'range_conjunctions', 'verse_words', 'chapter_words',)
+
+# List conjunctions from every language, split into the ones written as a word ("and", "y", "et") and the ones written as a symbol ("&")
+all_list_conjunctions = sorted({c for words in reference_words.values() for c in words['list_conjunctions']})
+list_conjunction_words = [c for c in all_list_conjunctions if any(char.isalpha() for char in c)]
+list_conjunction_symbols = [c for c in all_list_conjunctions if not any(char.isalpha() for char in c)]
+
+# Get alternate spellings of a name where a spelled-out list conjunction is swapped for a symbol, or the other way around. Example: "Doctrine and Covenants" –> "Doctrine & Covenants"
+def get_conjunction_aliases(name):
+  aliases = set()
+  for word in list_conjunction_words:
+    for symbol in list_conjunction_symbols:
+      if f' {word} ' in name:
+        aliases.add(name.replace(f' {word} ', f' {symbol} '))
+      if f' {symbol} ' in name:
+        aliases.add(name.replace(f' {symbol} ', f' {word} '))
+  return aliases
+
+
 languages = load_data('metadata-languages.min.json')
 scriptures = load_data('metadata-scriptures.min.json')
+
+# Accept a symbol conjunction ("&") wherever a name spells the conjunction out, and vice versa. The words come from the language data below rather than being hard-coded, so this covers "Doctrine & Covenants" for "Doctrine and Covenants" and "Doctrina & Convenios" for "Doctrina y Convenios".
+for key, value in list(scriptures['mapToSlug'].items()):
+  for alias in get_conjunction_aliases(key):
+    scriptures['mapToSlug'].setdefault(alias, value)
 
 scriptures['mapToSlugNormalized'] = {}
 for key, value in scriptures['mapToSlug'].items():
   normalized_key = normalize_for_compare(key)
   scriptures['mapToSlugNormalized'][normalized_key] = value
 
-reference_separators_pattern = r'|'.join([re.escape(s.strip()) for s in scriptures['summary']['punctuation']['referenceSeparator']] + [re.escape(';'), re.escape('|'), re.escape('•'), re.escape('\n')])
-chapter_verse_separators_pattern = r'|'.join([re.escape(s.strip()) for s in scriptures['summary']['punctuation']['chapterVerseSeparator']] + [re.escape(':')])
-verse_group_separators_pattern = r'|'.join([re.escape(s.strip()) for s in scriptures['summary']['punctuation']['verseGroupSeparator']] + [re.escape(',')])
-verse_range_separators_pattern = r'|'.join([re.escape(s.strip()) for s in scriptures['summary']['punctuation']['verseRangeSeparator']] + [re.escape('-'), re.escape('–'), re.escape('〜')])
-opening_parenthesis_pattern = r'|'.join([re.escape(s.strip()) for s in scriptures['summary']['punctuation']['openingParenthesis']] + [re.escape('(')])
-closing_parenthesis_pattern = r'|'.join([re.escape(s.strip()) for s in scriptures['summary']['punctuation']['closingParenthesis']] + [re.escape(')')])
+
+# Get regex patterns for the words that can appear in a scripture reference in a given language. Languages that aren't listed above return empty patterns.
+reference_words_cache = {}
+def get_reference_words(lang):
+  if lang not in reference_words_cache:
+    words_for_lang = reference_words.get(lang, {})
+    reference_words_cache[lang] = {
+      key: r'|'.join([re.escape(w) for w in words_for_lang.get(key, [])])
+      for key in reference_word_keys
+    }
+  return reference_words_cache[lang]
 
 
 # Get the BCP 47 language tag for a given language code

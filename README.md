@@ -39,6 +39,9 @@ https://www.churchofjesuschrist.org/study/scriptures/bofm/hel/5?id=p12&lang=eng#
 
 % scripturelookup get_church_url "/scriptures/ot" --lang "es"
 https://www.churchofjesuschrist.org/study/scriptures/ot?lang=spa
+
+% scripturelookup detect_references "As Nephi taught in 1 Ne. 3:7, and again in 2 Nephi 2:25."
+[['1 Ne. 3:7', 19, 28], ['2 Nephi 2:25', 43, 55]]
 ```
 
 
@@ -62,6 +65,9 @@ lookup.get_label('/scriptures/nt/1-jn/3.2-3', lang = 'cmn-Hant')
 
 lookup.get_church_url('/scriptures/ot', lang = 'es')
 # https://www.churchofjesuschrist.org/study/scriptures/ot?lang=spa
+
+lookup.detect_references('As Nephi taught in 1 Ne. 3:7, and again in 2 Nephi 2:25.')
+# [['1 Ne. 3:7', 19, 28], ['2 Nephi 2:25', 43, 55]]
 ```
 
 
@@ -77,6 +83,7 @@ lookup.get_church_url('/scriptures/ot', lang = 'es')
 - **get_reference_objects** – Get a list of references as objects.
 - **get_reference_attributes** – Get a list of references as dictionaries.
 - **sort_references** – Sort a list of references by label or in traditional book order.
+- **detect_references** – Find scripture references embedded in a string of text.
 
 ### Inputs
 
@@ -104,6 +111,8 @@ Any of the following input types are supported. You can also provide several inp
   - https://www.churchofjesuschrist.org/study/scriptures/ot?lang=eng
   - http://lds.org/scriptures/bofm/1-ne/3.7?lang=eng
   - [gospellibrary://content/scriptures/nt/john/3.16?lang=eng#16](https://www.churchofjesuschrist.org/study/scriptures/nt/john/3?id=p16&lang=eng#p16)
+
+`detect_references` takes an arbitrary text string and returns a list of `[label, start_offset, end_offset]`. The label is the exact detected text (not normalized). Start and end offset indicate the exclusive range of characters in the input string where the reference was found.
 
 ### Options
 
