@@ -39,7 +39,7 @@ def get_book_names(lang):
       if patterns.verse_group_separators.search(scripture_book_name):
         scripture_book_names_with_commas.append((scripture_book_name, scripture_book_name_without_comma,))
 
-    names_pattern = r'|'.join([re.escape(sbn) for sbn in scripture_book_names_without_commas])
+    names_pattern = patterns.build_trie_pattern(scripture_book_names_without_commas)
     book_name_cache[lang] = {
       'names_with_commas': scripture_book_names_with_commas,
       'separate_references_pattern': re.compile(rf'(?:^|[^\-])\b({names_pattern})', flags=re.IGNORECASE),
@@ -64,14 +64,19 @@ def build_book_names_pattern(lang):
         names.add(name)
         names.update(data.get_conjunction_aliases(name))
 
-  names = sorted(names, key=lambda x: (-len(x), x))
-  alternatives = []
-  for scripture_book_name in names:
-    alternative = re.escape(scripture_book_name)
-    alternative = re.sub(r'\\?\s', r'\\s', alternative)
-    alternative = patterns.verse_group_separators.sub(r'(?:,?)', alternative)
-    alternatives.append(alternative)
-  return r'|'.join(alternatives)
+  # A comma in a name is optional, so both spellings are listed. They have to be separate entries
+  # rather than an optional character, so that every path through the trie consumes the same
+  # characters – otherwise "TJS Génesis" and "TJS, Génesis 1–8" end up on branches that can both
+  # match the same text, and the shorter one wins.
+  for name in list(names):
+    name_without_comma = patterns.verse_group_separators.sub('', name)
+    if name_without_comma != name:
+      names.add(name_without_comma)
+
+  # Whitespace inside a name is matched loosely, so a non-breaking space in the data still matches a
+  # regular space in the text. That mapping is one character for one character, so the trie is safe.
+  normalized_names = [patterns.whitespace.sub(' ', name) for name in names]
+  return patterns.build_trie_pattern(normalized_names, character_patterns = {' ': r'\s'})
 
 
 # Get a compiled regex for detecting scripture references embedded in text
@@ -100,8 +105,11 @@ def get_detection_pattern(lang):
     # A number that starts a book name belongs to the next reference, not to this one's verse list. Without this, "Alma 5 and 2 Ne. 2:25" would run together as "Alma 5 and 2".
     not_the_next_book = rf'(?!(?:{books})\s*\d)'
 
-    context = rf'(?:\s*(?:{patterns.opening_parenthesis_pattern})\s*\d+(?:(?:{number_separator})\d+)*\s*(?:{patterns.closing_parenthesis_pattern}))?'
-    tail = rf'{leading_word}\d+(?:(?:{number_separator}){not_the_next_book}\d+)*{context}'
+    # A chapter or verse is never more than three digits, so a longer run of digits – a year, a page number – isn't part of a reference. The lookahead rejects the whole number, rather than matching just its first three digits.
+    number = r'\d{1,3}(?!\d)'
+
+    context = rf'(?:\s*(?:{patterns.opening_parenthesis_pattern})\s*{number}(?:(?:{number_separator}){number})*\s*(?:{patterns.closing_parenthesis_pattern}))?'
+    tail = rf'{leading_word}{number}(?:(?:{number_separator}){not_the_next_book}{number})*{context}'
 
     # Additional references that continue the same run. A conjunction can follow the separator, as in "Genesis 11:29; 22:23; and 24:15".
     conjunction_after_separator = rf'(?:(?:{inline_words})\s+)?' if inline_words else ''
@@ -357,7 +365,8 @@ def parse_references_string(input_string, lang = 'en', sort_by = None, skip_clea
     input_string = input_string.strip().strip(punctuation_to_strip).rstrip(':').strip()
     
     # If language is English, replace roman numerals with numbers. Example: 'II Corinthians" –> "2 Corinthians"
-    if lang == 'en':
+    # The substitutions have to run in order, since replacing "i " with "1" can join it to the text that follows, so they're guarded by a single search rather than combined into one pass.
+    if lang == 'en' and patterns.any_roman_numeral.search(input_string):
       for roman_numeral_pattern, arabic_numeral in patterns.roman_numerals:
         input_string = roman_numeral_pattern.sub(arabic_numeral, input_string)
     
@@ -502,7 +511,7 @@ def parse_references_string(input_string, lang = 'en', sort_by = None, skip_clea
     book_slug = None
     skip_book_name = False
     if book_string:
-      book_slug = data.scriptures['mapToSlug'].get(book_string, None) or data.scriptures['mapToSlugNormalized'].get(data.normalize_for_compare(book_string), None)
+      book_slug = data.scriptures['mapToSlug'].get(book_string, None) or data.get_map_to_slug_normalized().get(data.normalize_for_compare(book_string), None)
       # Special handling for Abraham facsimiles
       if book_slug == 'facsimiles' or (not book_slug and 'fac' in book_string.lower()):
         if previous_book_slug == 'abraham' and not previous_chapter:
@@ -571,6 +580,11 @@ def get_church_link(input_string, lang = 'en', separator = '\n', sort_by = None,
   return separator.join([ref.church_link(link_class = link_class, link_target = link_target, skip_book_name = skip_book_name, abbreviated = abbreviated, skip_lang = skip_lang, skip_fragment = skip_fragment) for ref in references])
   
 def detect_references(input_string, lang = 'en', range_split_limit = 1, **kwargs):
+  # Every reference includes a chapter number, so text with no digits in it can be skipped without
+  # building the language's detection pattern or scanning for book names.
+  if not input_string or not patterns.any_digit.search(input_string):
+    return []
+
   lang = data.get_bcp47(lang)
 
   # Replace newlines and other whitespace with regular spaces, one character for one character, so offsets stay valid in the original string

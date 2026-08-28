@@ -55,6 +55,57 @@ roman_numerals = [
   (re.compile(r'\biii\s', flags=re.IGNORECASE), '3'),
   (re.compile(r'\biv\s', flags=re.IGNORECASE), '4'),
 ]
+# Matches any of the prefixes above, so a string with no roman numeral at all – which is most of them – can skip the substitutions entirely
+any_roman_numeral = re.compile(r'\b(?:i|ii|iii|iv)\s', flags=re.IGNORECASE)
+
+# A single digit. Every reference needs a chapter number, so text with no digits anywhere can't contain one.
+any_digit = re.compile(r'\d')
+
+
+# Build a regex alternation that matches any of the given words, sharing common prefixes so the regex
+# engine doesn't retry every word at every position. Example: ["Genesis", "Genes"] –> "Gene(?:sis|s)".
+# Shared prefixes make this several times faster than a flat "Genesis|Genes" alternation, which the
+# engine has to walk one branch at a time. Longer words still win over shorter ones that they start
+# with, because the trailing group is greedy.
+#
+# Each character can be given its own sub-pattern, for names where a character shouldn't be matched
+# literally – see character_patterns in build_book_names_pattern.
+def build_trie_pattern(words, character_patterns = None, case_insensitive = True):
+  character_patterns = character_patterns or {}
+
+  # Characters that differ only by case have to share a trie node, since the pattern is meant to be
+  # compiled with re.IGNORECASE. Without this, "OP" and "Opisyal" would sit in sibling branches, and
+  # "OP" would win on the input "Opisyal" – a flat alternation avoids that by sorting longest first.
+  def trie_key(character):
+    lowercased = character.lower()
+    return lowercased if case_insensitive and len(lowercased) == 1 else character
+
+  trie = {}
+  for word in words:
+    node = trie
+    for character in word:
+      node = node.setdefault(trie_key(character), {})
+    node[''] = {}
+
+  def build_branch(node):
+    # A node with nothing but an end marker is the end of a word
+    if '' in node and len(node) == 1:
+      return None
+
+    branches = []
+    word_ends_here = False
+    for character, child_node in sorted(node.items()):
+      if character == '':
+        word_ends_here = True
+        continue
+      remainder = build_branch(child_node)
+      character_pattern = character_patterns.get(character) or re.escape(character)
+      branches.append(character_pattern + (f'(?:{remainder})' if remainder and len(remainder) > 1 else (remainder or '')))
+
+    branch_pattern = r'|'.join(branches)
+    return f'(?:{branch_pattern})?' if word_ends_here else branch_pattern
+
+  return build_branch(trie)
 
 
 # Get compiled regexes for normalizing the words that can appear in a reference in a given language

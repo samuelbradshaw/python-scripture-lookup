@@ -42,6 +42,14 @@ detection_cases = [
   # A period is a chapter/verse separator in some languages, but only between digits
   ('Alma 32. 5 people came.', 'en', ['Alma 32']),
 
+  # A chapter or verse is never more than three digits, so years and page numbers aren't references.
+  # The whole number is rejected rather than being truncated to its first three digits.
+  ('Psalm 119:176 is the last verse.', 'en', ['Psalm 119:176']),
+  ('D&C 124:123-45 was given.', 'en', ['D&C 124:123-45']),
+  ('Alma 1978 was a year.', 'en', []),
+  ('Alma 12345 xyz', 'en', []),
+  ('Alma 32:21 was quoted in 1978.', 'en', ['Alma 32:21']),
+
   # Chapter words can stand in for a book name; verse words cannot
   ('See chapter 3 and Alma chapter 32 verse 21.', 'en', ['chapter 3', 'Alma chapter 32 verse 21']),
   ('See verses 3-5 below.', 'en', []),

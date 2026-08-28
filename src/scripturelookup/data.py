@@ -6,9 +6,8 @@ import time
 import re
 import unicodedata
 
-# Third-party libraries
-import requests
-from bs4 import BeautifulSoup
+# Third-party libraries are imported where they're used, rather than here, so that commands that
+# never reach the network don't pay for loading them. Together they add about 0.12 seconds to startup.
 
 
 data_directory = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'data')
@@ -16,6 +15,8 @@ os.makedirs(data_directory, exist_ok = True)
 
 # Download JSON data
 def download_data(filename, filepath):
+  import requests
+
   request_url = f'https://cdn.jsdelivr.net/gh/samuelbradshaw/python-scripture-scraper@main/sample/{filename}'
   r = requests.get(request_url)
   r.encoding = 'utf-8'
@@ -101,10 +102,13 @@ for key, value in list(scriptures['mapToSlug'].items()):
   for alias in get_conjunction_aliases(key):
     scriptures['mapToSlug'].setdefault(alias, value)
 
-scriptures['mapToSlugNormalized'] = {}
-for key, value in scriptures['mapToSlug'].items():
-  normalized_key = normalize_for_compare(key)
-  scriptures['mapToSlugNormalized'][normalized_key] = value
+# Get a map of normalized names to book slugs, for comparing input that doesn't match a known name exactly. It's built the first time it's needed, rather than at import, since normalizing all ~10,000 names takes a moment and input that's already well-formed never needs it.
+map_to_slug_normalized = None
+def get_map_to_slug_normalized():
+  global map_to_slug_normalized
+  if map_to_slug_normalized is None:
+    map_to_slug_normalized = {normalize_for_compare(key): value for key, value in scriptures['mapToSlug'].items()}
+  return map_to_slug_normalized
 
 
 # Get regex patterns for the words that can appear in a scripture reference in a given language. Languages that aren't listed above return empty patterns.
@@ -137,6 +141,9 @@ def get_bcp47(lang):
 
 # Get the content for a given chapter verse from python-scripture-scraper or ChurchofJesusChrist.org
 def request_content(publication_slug, book_slug, chapter, verse_groups, church_url, lang = 'en', source = 'python-scripture-scraper'):
+  import requests
+  from bs4 import BeautifulSoup
+
   text_content = ''
   
   if not publication_slug and book_slug and chapter:
