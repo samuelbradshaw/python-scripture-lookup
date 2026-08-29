@@ -1,6 +1,7 @@
 # Python standard libraries
 import sys
 import re
+import unicodedata
 
 # Third-party libraries
 import icu
@@ -12,6 +13,19 @@ from . import data, numbers, patterns
 natural_sort_collators = {}
 book_name_cache = {}
 detection_pattern_cache = {}
+ordinal_pattern_cache = {}
+numbered_book_pattern_cache = {}
+
+# Punctuation to remove from either end of a reference, gathered from the separators used across all languages
+punctuation_to_strip = ''.join(data.scriptures['summary']['punctuation']['referenceSeparator'] + data.scriptures['summary']['punctuation']['verseGroupSeparator'] + data.scriptures['summary']['punctuation']['verseRangeSeparator']) + '(;,.'
+
+# Books with only one chapter, where a bare number is the verse rather than the chapter – "Jude 3" is Jude 1:3, and there is no Jude 3. Citing the whole book is just the name, with no number at all.
+single_chapter_book_slugs = {
+  slug
+  for publication in data.scriptures['structure'].values()
+  for slug, book in publication['books'].items()
+  if book['churchChapters'] == [1]
+}
 
 
 # Get scripture book names and abbreviations for a language, sorted longest first so that (for example) "1 John" is recognized before "John"
@@ -40,15 +54,85 @@ def get_book_names(lang):
         scripture_book_names_with_commas.append((scripture_book_name, scripture_book_name_without_comma,))
 
     names_pattern = patterns.build_trie_pattern(scripture_book_names_without_commas)
+    # A chapter number has to follow, since this marks where one reference starts after another, and a reference always has one. Without that, a short abbreviation that's also an ordinary word splits text that was never a reference – "De" is French for Deuteronomy, and would break "Article de foi 1:3" into "Article" and "de foi 1:3".
     book_name_cache[lang] = {
       'names_with_commas': scripture_book_names_with_commas,
-      'separate_references_pattern': re.compile(rf'(?:^|[^\-])\b({names_pattern})', flags=re.IGNORECASE),
+      'separate_references_pattern': re.compile(rf'(?:^|[^\-])\b({names_pattern}){patterns.not_followed_by_letter_pattern}(?=\s*\d)', flags=re.IGNORECASE),
     }
   return book_name_cache[lang]
 
 
 # Study helps aren't scripture references, and their abbreviations ("TG", "BD", "IT", "GS") are too short to tell apart from ordinary text
 slugs_to_skip_when_detecting = ('topical-guide', 'bible-dictionary', 'index-to-the-triple-combination', 'guide-to-the-scriptures', 'joseph-smith-translation',)
+
+
+# Build a map of character to character class, so a name with a diacritic also matches text that leaves the
+# diacritic out. Example: "é" –> "[eé]", which lets "2 Nephi" match the French name "2 Néphi".
+#
+# Only the accented character is widened – a plain letter in a name still has to be spelled plainly. Going
+# the other way too, so that "e" in a name would also match "é" in the text, is the rarer mistake by far, and
+# it costs much more: a class on every "e" in every name roughly triples the time it takes to compile the
+# detection pattern, since a plain letter is a great deal more common than an accented one.
+#
+# The classes are derived from the names themselves, so no per-language table is needed. Each class stands
+# in for exactly one character, so the trie invariant described in build_book_names_pattern still holds.
+def build_diacritic_character_patterns(names):
+  character_patterns = {}
+  for name in names:
+    for character in name:
+      decomposed = unicodedata.normalize('NFKD', character)
+      if len(decomposed) > 1 and unicodedata.category(decomposed[0])[0] == 'L' and all(unicodedata.category(c) == 'Mn' for c in decomposed[1:]):
+        # Lowercase throughout: build_trie_pattern looks these up by its own lowercased node keys, and the pattern is compiled with re.IGNORECASE, so listing the uppercase forms would only make it bigger
+        accented_character = character.lower()
+        character_patterns[accented_character] = '[' + ''.join(sorted({accented_character, decomposed[0].lower()})) + ']'
+  return character_patterns
+
+
+# Get the spellings of each name with a plural "s" dropped from one word, since citing the singular is a
+# common slip and languages don't pluralize the same word. Examples: "Articles de foi" –> "Article de foi";
+# "Artículos de Fe" –> "Artículo de Fe"; "Doctrine et Alliances" –> "Doctrine et Alliance". Only one word is
+# changed at a time, since that's the slip being allowed for. Names of a single word are left alone, so an
+# ordinary French "acte 2" isn't read as the book "Actes".
+def get_singular_name_variants(names):
+  variants = set()
+  for name in names:
+    if ' ' not in name:
+      continue
+    words = name.split(' ')
+    for index, word in enumerate(words):
+      if word.endswith('s') and len(word) > 3:
+        variants.add(' '.join(words[:index] + [word[:-1]] + words[index + 1:]))
+  return variants
+
+
+# Get the character-to-pattern map for matching the given names, covering every name set that will share one
+# regex. It has to be built from the precomposed spellings, before build_name_matching_pattern adds the
+# decomposed ones – a decomposed name has no accented character for a class to be derived from.
+def build_character_patterns(*name_sets):
+  character_patterns = {' ': r'\s'}
+  for names in name_sets:
+    character_patterns.update(build_diacritic_character_patterns({patterns.whitespace.sub(' ', name) for name in names}))
+  return character_patterns
+
+
+# Build a regex alternation matching any of the given names, allowing for the ways they get written.
+# Every name set in the detection patterns comes through here, so the steps stay in one order.
+def build_name_matching_pattern(names, character_patterns):
+  # Whitespace inside a name is matched loosely, so a non-breaking space in the data still matches a
+  # regular space in the text. That mapping is one character for one character, so the trie is safe.
+  names = {patterns.whitespace.sub(' ', name) for name in names}
+
+  # A no-op for a list of number words, none of which are plural
+  names |= get_singular_name_variants(names)
+
+  # Text can spell an accented character either precomposed ("é") or decomposed ("e" followed by a combining
+  # acute accent). The decomposed spelling is added as its own name, rather than being folded into the
+  # character classes, so that every path through the trie still consumes a fixed number of characters – and
+  # so that detection never has to rewrite the input, which would shift the offsets it reports.
+  names |= {unicodedata.normalize('NFD', name) for name in names}
+
+  return patterns.build_trie_pattern(sorted(names), character_patterns = character_patterns)
+
 
 # Build a regex alternation that matches anything that can start a scripture reference, allowing flexible whitespace and optional commas. Example: "JST, Genesis" –> "JST(?:,?)\sGenesis"
 def build_book_names_pattern(lang):
@@ -73,14 +157,133 @@ def build_book_names_pattern(lang):
     if name_without_comma != name:
       names.add(name_without_comma)
 
-  # Whitespace inside a name is matched loosely, so a non-breaking space in the data still matches a
-  # regular space in the text. That mapping is one character for one character, so the trie is safe.
-  normalized_names = [patterns.whitespace.sub(' ', name) for name in names]
-  return patterns.build_trie_pattern(normalized_names, character_patterns = {' ': r'\s'})
+  return build_name_matching_pattern(names, build_character_patterns(names))
 
 
-# Get a compiled regex for detecting scripture references embedded in text
-def get_detection_pattern(lang):
+# Get the patterns for a numbered book cited with its number written out or abbreviated – "First Nephi",
+# "1st Nephi", "I Nephi" for "1 Nephi". Matching a prefix followed by the rest of the name ("Nephi") keeps
+# this small: there are only about 18 of those stems, where spelling out every combination as its own name
+# would grow the book names pattern by half.
+#
+# Each number is paired with the stems that actually exist for it, so "4th John" doesn't match – there is no
+# 4 John, and pooling the stems would invent one. Requiring a stem is also what keeps an ordinary "I saw
+# Alma 32:21" from matching.
+def get_numbered_book_patterns(lang):
+  if lang not in numbered_book_pattern_cache:
+    number_by_form = data.get_book_number_forms(lang)
+    forms_by_number = {}
+    for form, number in number_by_form.items():
+      forms_by_number.setdefault(number, set()).add(form)
+
+    stems_by_number = {}
+    for translated_name in data.scriptures['languages'][lang]['translatedNames'].values():
+      for key in ('name', 'abbrev',):
+        name = patterns.whitespace.sub(' ', translated_name.get(key) or '')
+        number_match = patterns.leading_book_number.match(name)
+        if number_match:
+          stems_by_number.setdefault(int(number_match.group(1)), set()).add(number_match.group(2))
+
+    # One pair of tries per number, so a prefix only matches the stems that go with it
+    character_patterns = build_character_patterns(*stems_by_number.values(), *forms_by_number.values())
+    branches = [
+      (build_name_matching_pattern(forms_by_number[number], character_patterns), build_name_matching_pattern(stems, character_patterns),)
+      for number, stems in sorted(stems_by_number.items())
+      if forms_by_number.get(number)
+    ]
+
+    if not branches:
+      numbered_book_pattern_cache[lang] = None
+    else:
+      # For parsing: one capture around the whole alternation, so the matched prefix comes back whichever
+      # branch it took and can be looked up in number_by_form. The stem is only looked ahead at, so it stays
+      # where it is.
+      rewrite_alternation = r'|'.join(rf'(?:{form_pattern})(?=\s+(?:{stem_pattern}){patterns.not_followed_by_letter_pattern})' for form_pattern, stem_pattern in branches)
+      numbered_book_pattern_cache[lang] = {
+        'fragment': r'|'.join(rf'(?:{form_pattern})\s+(?:{stem_pattern})' for form_pattern, stem_pattern in branches),
+        'rewrite': re.compile(rf'{patterns.reference_start_boundary_pattern}({rewrite_alternation})\s+', flags=re.IGNORECASE),
+        'number_by_form': number_by_form,
+      }
+  return numbered_book_pattern_cache[lang]
+
+
+# Get the patterns for an article of faith cited by position, as in "First Article of Faith" or "Premier
+# article de foi". The Articles of Faith is a single chapter, so the ordinal is the verse.
+#
+# Only the full name is matched, never the abbreviation: "Premier AF" isn't a real citation style, and a
+# two-letter abbreviation would be useless as the prefilter below ("af" sits inside "after" and "draft").
+def get_ordinal_patterns(lang):
+  if lang not in ordinal_pattern_cache:
+    number_by_form = data.get_ordinal_forms(lang)
+    translated_name = data.scriptures['languages'][lang]['translatedNames'].get('articles-of-faith') or {}
+    book_names = set()
+    name = translated_name.get('name') or ''
+    if name:
+      book_names.add(name)
+      book_names.update(data.get_conjunction_aliases(name))
+    book_names |= get_singular_name_variants(book_names)
+
+    if not number_by_form or not book_names:
+      ordinal_pattern_cache[lang] = None
+    else:
+      character_patterns = build_character_patterns(book_names, number_by_form)
+      ordinals = build_name_matching_pattern(number_by_form, character_patterns)
+      books = build_name_matching_pattern(book_names, character_patterns)
+
+      # Ordinals can be listed or given as a range, as in "First and Third Articles of Faith"
+      words = data.get_reference_words(lang)
+      joiners = [rf'\s*(?:{patterns.verse_group_separators_pattern})\s*']
+      for key in ('list_conjunctions', 'range_conjunctions',):
+        if words[key]:
+          joiners.append(rf'\s+(?:{words[key]})\s+')
+      joiner_alternation = r'|'.join(joiners)
+      ordinal_run = rf'(?:{ordinals})(?:(?:{joiner_alternation})(?:{ordinals}))*'
+
+      ordinal_pattern_cache[lang] = {
+        'number_by_form': number_by_form,
+        # Spliced into the detection pattern as an anchor that needs no number after it – the ordinal is the number
+        'fragment': rf'(?:{ordinal_run})\s+(?:{books})',
+        'rewrite': re.compile(rf'{patterns.reference_start_boundary_pattern}({ordinal_run})\s+({books}){patterns.not_followed_by_letter_pattern}', flags=re.IGNORECASE),
+        'single_ordinal': re.compile(rf'{patterns.reference_start_boundary_pattern}(?:{ordinals}){patterns.not_followed_by_letter_pattern}', flags=re.IGNORECASE),
+        'range_conjunction': re.compile(rf'\s+(?:{words["range_conjunctions"]})\s+', flags=re.IGNORECASE) if words['range_conjunctions'] else None,
+        # Plain lowercased strings, for the cheap test that decides whether the ordinal pattern is worth
+        # using at all. Taken from the precomposed spellings only – a decomposed duplicate would be one more
+        # substring to scan on every call and could never match text the precomposed one doesn't.
+        'prefilter_names': sorted({patterns.whitespace.sub(' ', book_name).lower() for book_name in book_names}),
+      }
+  return ordinal_pattern_cache[lang]
+
+
+# Rewrite an article of faith cited by position into the book name followed by plain numbers, which the rest
+# of parsing already understands. The single-chapter rule then turns those numbers into verses.
+# Example: "First and Third Articles of Faith" –> "Articles of Faith 1,3" –> Articles of Faith 1:1 and 1:3
+def replace_ordinal_references(input_string, lang):
+  ordinal_patterns = get_ordinal_patterns(lang)
+  if not ordinal_patterns:
+    return input_string
+
+  def replace(match):
+    ordinal_run, book_name = match.group(1), match.group(2)
+    ordinal_numbers = [ordinal_patterns['number_by_form'][ordinal.group(0).lower()] for ordinal in ordinal_patterns['single_ordinal'].finditer(ordinal_run)]
+    is_range = len(ordinal_numbers) > 1 and ordinal_patterns['range_conjunction'] and ordinal_patterns['range_conjunction'].search(ordinal_run)
+    numbers_string = f'{ordinal_numbers[0]}-{ordinal_numbers[-1]}' if is_range else ','.join(str(number) for number in ordinal_numbers)
+    return f'{book_name} {numbers_string}'
+  return ordinal_patterns['rewrite'].sub(replace, input_string)
+
+
+# Replace a book number written out or abbreviated with its digit, so the name matches the data.
+# Examples: "II Corinthians" –> "2 Corinthians"; "1st John" –> "1 John"; "Premier Néphi" –> "1 Néphi"
+def replace_book_number_prefixes(input_string, lang):
+  numbered_book_patterns = get_numbered_book_patterns(lang)
+  if not numbered_book_patterns:
+    return input_string
+
+  def replace(match):
+    return str(numbered_book_patterns['number_by_form'][match.group(1).lower()]) + ' '
+  return numbered_book_patterns['rewrite'].sub(replace, input_string)
+
+
+# Get the compiled regexes for detecting scripture references embedded in text
+def get_detection_patterns(lang):
   if lang not in detection_pattern_cache:
     words = data.get_reference_words(lang)
 
@@ -89,21 +292,25 @@ def get_detection_pattern(lang):
     leading_words = r'|'.join([w for w in (words['verse_words'], words['chapter_words'],) if w])
 
     books = build_book_names_pattern(lang)
+    # A numbered book can be cited with its number written out, as in "First Nephi" or "I Nephi". That spelling has to be part of the anchor, since it's what starts the reference.
+    numbered_book_patterns = get_numbered_book_patterns(lang)
+    numbered_books = numbered_book_patterns['fragment'] if numbered_book_patterns else None
     anchor = rf'(?P<book>{books})'
+    if numbered_books:
+      anchor += rf'|(?P<numbered_book>{numbered_books})'
     if words['chapter_words']:
       anchor += rf'|(?P<chapter_word>{words["chapter_words"]})'
-    anchor_continued = rf'{books}|{words["chapter_words"]}' if words['chapter_words'] else books
+    anchor_continued = r'|'.join([p for p in (books, numbered_books, words['chapter_words'] or None,) if p])
 
-    # Separator between two numbers in a reference. A period is one of the possible chapter/verse separators, and it can't be followed by whitespace – without that restriction, "Alma 32. 5 people" would be read as "Alma 32:5". The other chapter/verse separators are unambiguous, so "Mosiah 28: 13" is fine.
-    chapter_verse_separators_allowing_space = r'|'.join([s for s in patterns.chapter_verse_separators_pattern.split(r'|') if s != re.escape('.')])
-    number_separator = rf'(?:{chapter_verse_separators_allowing_space})\s*|(?:{patterns.chapter_verse_separators_pattern})|\s*(?:{patterns.verse_group_separators_pattern}|{patterns.verse_range_separators_pattern})\s*'
+    # Separator between two numbers in a reference – a chapter/verse separator, or a verse group or range separator
+    number_separator = rf'{patterns.chapter_verse_separator_pattern}|\s*(?:{patterns.verse_group_separators_pattern}|{patterns.verse_range_separators_pattern})\s*'
     if inline_words:
       number_separator = rf'(?:{number_separator})(?:(?:{inline_words})\s+)?|\s+(?:{inline_words})\s+'
 
     # Chapter and verses, ending on a digit or a closing parenthesis so that trailing whitespace and punctuation are never included in the match
     leading_word = rf'(?:(?:{leading_words})\s+)?' if leading_words else ''
     # A number that starts a book name belongs to the next reference, not to this one's verse list. Without this, "Alma 5 and 2 Ne. 2:25" would run together as "Alma 5 and 2".
-    not_the_next_book = rf'(?!(?:{books})\s*\d)'
+    not_the_next_book = rf'(?!(?:{anchor_continued})\s*\d)'
 
     # A chapter or verse is never more than three digits, so a longer run of digits – a year, a page number – isn't part of a reference. The lookahead rejects the whole number, rather than matching just its first three digits.
     number = r'\d{1,3}(?!\d)'
@@ -115,8 +322,29 @@ def get_detection_pattern(lang):
     conjunction_after_separator = rf'(?:(?:{inline_words})\s+)?' if inline_words else ''
     continued = rf'(?:\s*(?:{patterns.reference_separators_pattern})\s*{conjunction_after_separator}(?:(?:{anchor_continued})\s*)?{tail})*'
 
-    detection_pattern_cache[lang] = re.compile(rf'(?<![-\w])(?:{anchor})\s*{tail}{continued}', flags=re.IGNORECASE)
+    ordinal_patterns = get_ordinal_patterns(lang)
+    detection_pattern_cache[lang] = {
+      'detection': re.compile(rf'{patterns.reference_start_boundary_pattern}(?:{anchor})\s*{tail}{continued}', flags=re.IGNORECASE),
+      # The two below are kept as strings and compiled only when they're needed – see get_lazy_pattern.
+      # Everything that can follow a book name, without the anchor in front.
+      'reference_tail': rf'\s*{tail}{continued}',
+      # The detection pattern with an article of faith cited by position allowed as an anchor of its own,
+      # needing no number after it.
+      'detection_with_ordinals': rf'{patterns.reference_start_boundary_pattern}(?:(?:{anchor})\s*{tail}|{ordinal_patterns["fragment"]}){continued}' if ordinal_patterns else None,
+    }
   return detection_pattern_cache[lang]
+
+
+# Compile one of the detection patterns that get_detection_patterns left as a string, and remember it. Both
+# of them spell the book names out several times over, so compiling either costs about as much as preparing
+# the whole language – and most callers need neither. "reference_tail" is only reached when a match ends on a
+# bare number that turns out to start an unrecognized book name; "detection_with_ordinals" only when the text
+# names the Articles of Faith.
+compiled_lazy_pattern_cache = {}
+def get_lazy_pattern(lang, key):
+  if (lang, key,) not in compiled_lazy_pattern_cache:
+    compiled_lazy_pattern_cache[(lang, key,)] = re.compile(get_detection_patterns(lang)[key], flags=re.IGNORECASE)
+  return compiled_lazy_pattern_cache[(lang, key,)]
 
 
 class Reference:
@@ -357,21 +585,30 @@ def convert_verse_groups_to_string(verse_groups, verse_range_separator, verse_gr
 # The script will run faster if skip_cleanup is True, but all scripture references or URIs will be expected to have consistent formatting
 def parse_references_string(input_string, lang = 'en', sort_by = None, skip_cleanup = False, range_split_limit = 1):
   lang = data.get_bcp47(lang)
-  
-  # Remove leading or trailing whitespace and punctuation
-  punctuation_to_strip = ''.join(data.scriptures['summary']['punctuation']['referenceSeparator'] + data.scriptures['summary']['punctuation']['verseGroupSeparator'] + data.scriptures['summary']['punctuation']['verseRangeSeparator']) + '(;,.'
-  
+
   if not skip_cleanup:
     input_string = input_string.strip().strip(punctuation_to_strip).rstrip(':').strip()
-    
-    # If language is English, replace roman numerals with numbers. Example: 'II Corinthians" –> "2 Corinthians"
-    # The substitutions have to run in order, since replacing "i " with "1" can join it to the text that follows, so they're guarded by a single search rather than combined into one pass.
-    if lang == 'en' and patterns.any_roman_numeral.search(input_string):
-      for roman_numeral_pattern, arabic_numeral in patterns.roman_numerals:
-        input_string = roman_numeral_pattern.sub(arabic_numeral, input_string)
-    
+
+    # Compose accented characters, so text that spells "é" as "e" plus a combining acute accent still matches
+    # a book name. Parsing returns Reference objects rather than offsets into the input, so shortening the
+    # string here is harmless – detection handles the same case without rewriting anything (see
+    # build_book_names_pattern).
+    if not unicodedata.is_normalized('NFC', input_string):
+      input_string = unicodedata.normalize('NFC', input_string)
+
+    # Replace a written-out book number with its digit. Examples: "II Corinthians" –> "2 Corinthians";
+    # "1st John" –> "1 John"; "Premier Néphi" –> "1 Néphi". A book name has to follow, so an ordinary
+    # "I saw Alma 32:21" is left alone.
+    input_string = replace_book_number_prefixes(input_string, lang)
+
     # Normalize whitespace so it matches the spaces in book names, but keep line breaks, since they separate one reference from the next
     input_string = patterns.whitespace_except_line_breaks.sub(' ', input_string)
+
+    # Close up whitespace around a separator that sits between two numbers, so spacing conventions like the French "D&A 110 :11-16" are read the same as "D&A 110:11-16". Doing this before anything else keeps the rest of the cleanup from mistaking the spaced-out part for trailing text.
+    input_string = patterns.separator_whitespace_between_digits.sub(r'\1', input_string)
+
+    # Turn an article of faith cited by position into the book name followed by numbers. Example: "First and Third Articles of Faith" –> "Articles of Faith 1,3"
+    input_string = replace_ordinal_references(input_string, lang)
 
     # Remove commas from book names so further normalization doesn't try to split it into two references. Example: "JST, Genesis 1" –> "JST Genesis 1"
     book_names = get_book_names(lang)
@@ -511,7 +748,9 @@ def parse_references_string(input_string, lang = 'en', sort_by = None, skip_clea
     book_slug = None
     skip_book_name = False
     if book_string:
-      book_slug = data.scriptures['mapToSlug'].get(book_string, None) or data.get_map_to_slug_normalized().get(data.normalize_for_compare(book_string), None)
+      # A name off by one character, as in "Doctrine et Alliance" or "Helamen", only resolves when cleanup is
+      # wanted – skip_cleanup promises well-formed input, and the loose comparison is the expensive stage
+      book_slug = data.get_book_slug(book_string, allow_loose_match = not skip_cleanup)
       # Special handling for Abraham facsimiles
       if book_slug == 'facsimiles' or (not book_slug and 'fac' in book_string.lower()):
         if previous_book_slug == 'abraham' and not previous_chapter:
@@ -538,7 +777,13 @@ def parse_references_string(input_string, lang = 'en', sort_by = None, skip_clea
       skip_book_name = True
       if previous_chapter and not chapter:
         chapter = previous_chapter
-    
+
+    # A book with only one chapter takes a bare number as its verse. "Jude 3" is Jude 1:3 – there is no Jude 3.
+    # This happens before previous_chapter is set below, so a continuation like "Jude 3; 5" inherits chapter 1.
+    if book_slug in single_chapter_book_slugs and chapter is not None and not verse_groups:
+      verse_groups = parse_verses_string(str(chapter), range_split_limit = range_split_limit)
+      chapter = 1
+
     publication_slug = None
     if book_slug in data.scriptures['structure'].keys():
       publication_slug = book_slug
@@ -579,26 +824,97 @@ def get_church_link(input_string, lang = 'en', separator = '\n', sort_by = None,
   references = parse_references_string(input_string, lang = lang, sort_by = sort_by, skip_cleanup = skip_cleanup, range_split_limit = range_split_limit)
   return separator.join([ref.church_link(link_class = link_class, link_target = link_target, skip_book_name = skip_book_name, abbreviated = abbreviated, skip_lang = skip_lang, skip_fragment = skip_fragment) for ref in references])
   
+# Look for a book name that the detection pattern didn't recognize, sitting just past the end of a match that
+# ended on a bare number. The number belongs to that name rather than to the reference before it, as in
+# "Luc 2:10-11 | 2 Nefi 3", where "| 2" starts "2 Nefi" instead of continuing Luke. Returns the position the
+# name ends at, or None.
+#
+# The lookup is what tells this case apart from a genuine continuation – in "See Alma 5; 7 for more context",
+# the 7 really is Alma chapter 7, and the words after it are ordinary text. A name that the detection pattern
+# already knows never gets here, since the pattern would have carried it into the same match.
+def find_unrecognized_book_name(working_string, number, position):
+  words = []
+  for word_match in patterns.following_word.finditer(working_string, position):
+    if word_match.start() > (words[-1][1] if words else position) + 1:
+      # A gap wider than a single space means the words aren't part of one name
+      break
+    words.append((word_match.group(0), word_match.end(),))
+    if len(words) == 3:
+      break
+
+  # Longest first, so "2 Doctrine and Covenants" is preferred over "2 Doctrine"
+  for count in range(len(words), 0, -1):
+    book_string = (number + ' ' + ' '.join(word for word, word_end in words[:count])).strip(punctuation_to_strip)
+    if data.get_book_slug(book_string):
+      return words[count - 1][1]
+  return None
+
+
 def detect_references(input_string, lang = 'en', range_split_limit = 1, **kwargs):
-  # Every reference includes a chapter number, so text with no digits in it can be skipped without
-  # building the language's detection pattern or scanning for book names.
-  if not input_string or not patterns.any_digit.search(input_string):
+  if not input_string:
     return []
 
   lang = data.get_bcp47(lang)
+
+  # An article of faith can be cited by position, with no digit anywhere ("First Article of Faith"), so the
+  # book name is looked for as well. It's a plain substring test on text lowercased once, which is cheaper
+  # than the digit scan, and it only runs for the few languages that have ordinals seeded.
+  ordinal_patterns = get_ordinal_patterns(lang)
+  ordinal_book_named = False
+  if ordinal_patterns:
+    lowercased_string = input_string.lower()
+    ordinal_book_named = any(book_name in lowercased_string for book_name in ordinal_patterns['prefilter_names'])
+
+  # Every other reference includes a chapter number, so text with no digits in it can be skipped without
+  # building the language's detection pattern or scanning for book names.
+  if not ordinal_book_named and not patterns.any_digit.search(input_string):
+    return []
+
+  # The pattern that also allows an ordinal anchor costs more to scan, so it's only used when the text
+  # actually names the Articles of Faith
+  detection_pattern = get_lazy_pattern(lang, 'detection_with_ordinals') if ordinal_book_named else get_detection_patterns(lang)['detection']
+  # Only some languages have a numbered-book branch, so the group may not be in the pattern at all
+  has_numbered_book_group = 'numbered_book' in detection_pattern.groupindex
 
   # Replace newlines and other whitespace with regular spaces, one character for one character, so offsets stay valid in the original string
   working_string = patterns.whitespace.sub(' ', input_string)
 
   detections = []
-  for match in get_detection_pattern(lang).finditer(working_string):
-    references = parse_references_string(match.group(0), lang = lang, range_split_limit = range_split_limit)
-    if match.group('book') and not any(ref.book_slug or ref.publication_slug for ref in references):
+  previous_end = 0
+  for match in detection_pattern.finditer(working_string):
+    # A trailing reference picked up below can reach past the end of its match, so anything already covered is skipped
+    if match.start() < previous_end:
+      continue
+    start, end = match.start(), match.end()
+
+    # A match that ends on a bare number may have claimed the start of a book name it didn't recognize
+    trailing_reference = None
+    bare_number_match = patterns.trailing_bare_number.search(working_string, start, end)
+    if bare_number_match:
+      book_name_end = find_unrecognized_book_name(working_string, bare_number_match.group(1), end)
+      if book_name_end:
+        # Give the number back, stopping before the separator so the match never ends on whitespace
+        end = start + len(working_string[start:bare_number_match.start()].rstrip())
+        tail_match = get_lazy_pattern(lang, 'reference_tail').match(working_string, book_name_end)
+        if tail_match:
+          trailing_reference = (bare_number_match.start(1), tail_match.end(),)
+
+    references = parse_references_string(working_string[start:end], lang = lang, range_split_limit = range_split_limit)
+    matched_a_book_name = match.group('book') or (has_numbered_book_group and match.group('numbered_book'))
+    if matched_a_book_name and not any(ref.book_slug or ref.publication_slug for ref in references):
       # Looked like a book name, but it didn't resolve to a known book
       continue
     if not any(ref.chapter for ref in references):
       continue
-    detections.append([input_string[match.start():match.end()], match.start(), match.end()])
+    detections.append([input_string[start:end], start, end])
+    previous_end = end
+
+    if trailing_reference:
+      trailing_start, trailing_end = trailing_reference
+      references = parse_references_string(working_string[trailing_start:trailing_end], lang = lang, range_split_limit = range_split_limit)
+      if any(ref.chapter for ref in references):
+        detections.append([input_string[trailing_start:trailing_end], trailing_start, trailing_end])
+        previous_end = trailing_end
   return detections
 
 def get_reference_objects(input_string, lang = 'en', sort_by = None, skip_cleanup = False, range_split_limit = 1, **kwargs):

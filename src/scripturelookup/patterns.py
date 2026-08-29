@@ -14,9 +14,18 @@ from . import data
 reference_separators_pattern = r'|'.join([re.escape(s.strip()) for s in data.scriptures['summary']['punctuation']['referenceSeparator']] + [re.escape(';'), re.escape('|'), re.escape('•'), re.escape('\n')])
 chapter_verse_separators_pattern = r'|'.join([re.escape(s.strip()) for s in data.scriptures['summary']['punctuation']['chapterVerseSeparator']] + [re.escape(':'), re.escape('.')])
 verse_group_separators_pattern = r'|'.join([re.escape(s.strip()) for s in data.scriptures['summary']['punctuation']['verseGroupSeparator']] + [re.escape(',')])
-verse_range_separators_pattern = r'|'.join([re.escape(s.strip()) for s in data.scriptures['summary']['punctuation']['verseRangeSeparator']] + [re.escape('-'), re.escape('–'), re.escape('〜'), re.escape('~')])
+# The dashes here cover the ones typesetting substitutes for a plain hyphen, which look identical in print but aren't the same character: U+2010 hyphen, U+2011 non-breaking hyphen (common in engraved music, so a range never wraps), U+2012 figure dash, and U+2212 minus sign. An em dash is left out, since it separates clauses in ordinary prose.
+verse_range_separators_pattern = r'|'.join([re.escape(s.strip()) for s in data.scriptures['summary']['punctuation']['verseRangeSeparator']] + [re.escape(s) for s in ('-', '–', '〜', '~', '‐', '‑', '‒', '−',)])
+# Chapter/verse separators that can have whitespace around them, as in the French "D&A 110 :11-16". A period is left out: it's also an abbreviation mark and a sentence ending, so "Alma 32. 5 people came" would otherwise read as "Alma 32:5". The other separators are unambiguous.
+chapter_verse_separators_allowing_space_pattern = r'|'.join([s for s in chapter_verse_separators_pattern.split(r'|') if s != re.escape('.')])
+
 opening_parenthesis_pattern = r'|'.join([re.escape(s.strip()) for s in data.scriptures['summary']['punctuation']['openingParenthesis']] + [re.escape('(')])
 closing_parenthesis_pattern = r'|'.join([re.escape(s.strip()) for s in data.scriptures['summary']['punctuation']['closingParenthesis']] + [re.escape(')')])
+
+# A reference can't start in the middle of a word, or after a hyphen. Used in front of a book name.
+reference_start_boundary_pattern = r'(?<![-\w])'
+# A name can't be followed by another letter, or a short abbreviation would match inside a longer word – "Al" (Alma) inside "Alliances". A word boundary won't do, since many abbreviations end in a period ("Gen."), where "\b" behaves backwards.
+not_followed_by_letter_pattern = r'(?![^\W\d_])'
 
 # Any Unicode whitespace character – newlines, tabs, non-breaking spaces, ideographic spaces, and so on
 whitespace = re.compile(r'\s')
@@ -32,8 +41,14 @@ verse_group_separators_repeated = re.compile(rf'(?:{verse_group_separators_patte
 opening_parenthesis = re.compile(opening_parenthesis_pattern)
 closing_parenthesis = re.compile(closing_parenthesis_pattern)
 
-# A chapter/verse separator that sits between two digits, so the period in an abbreviation like "Gen." isn't mistaken for one
-chapter_verse_separator_between_digits = re.compile(rf'(?<=\d)(?:{chapter_verse_separators_pattern})(?=\d)')
+# Whitespace around a separator that sits between two numbers, which is where it's safe to remove: a separator between two digits is always part of the reference, so nothing else can be meant by it. Examples: "110 :11-16" –> "110:11-16"; "Genesis 1 – 3" –> "Genesis 1–3". Line breaks are left alone, since they separate one reference from the next.
+separator_whitespace_between_digits = re.compile(rf'(?<=\d)[^\S\n]*({chapter_verse_separators_allowing_space_pattern}|{verse_range_separators_pattern}|{verse_group_separators_pattern})[^\S\n]*(?=\d)')
+
+# A chapter/verse separator, with whitespace allowed around the ones that can take it, so the French "110 :11-16" reads the same as "110:11-16". Shared with the detection pattern's number separator, so the rule about which separators allow a space lives in one place.
+chapter_verse_separator_pattern = rf'\s*(?:{chapter_verse_separators_allowing_space_pattern})\s*|(?:{chapter_verse_separators_pattern})'
+
+# The same, required to sit between two digits, so the period in an abbreviation like "Gen." isn't mistaken for one
+chapter_verse_separator_between_digits = re.compile(rf'(?<=\d)(?:{chapter_verse_separator_pattern})(?=\d)')
 # A range of chapters. Example: "1–5"
 chapter_range = re.compile(rf'\d+(?:{verse_range_separators_pattern})\d+')
 
@@ -48,18 +63,16 @@ trailing_text = re.compile(rf'^.*?\d((?:\:|{closing_parenthesis_pattern})?\s+[^{
 # A parenthetical at the end of a reference, which holds context verses. Example: "Gen. 1:3 (3–4)"
 trailing_parenthetical = re.compile(rf'^(.*?)\s*(?:{opening_parenthesis_pattern})([^)）]*)(?:{closing_parenthesis_pattern})$')
 
-# English roman numeral prefixes, paired with the number they stand for. Example: "II Corinthians" –> "2 Corinthians"
-roman_numerals = [
-  (re.compile(r'\bi\s', flags=re.IGNORECASE), '1'),
-  (re.compile(r'\bii\s', flags=re.IGNORECASE), '2'),
-  (re.compile(r'\biii\s', flags=re.IGNORECASE), '3'),
-  (re.compile(r'\biv\s', flags=re.IGNORECASE), '4'),
-]
-# Matches any of the prefixes above, so a string with no roman numeral at all – which is most of them – can skip the substitutions entirely
-any_roman_numeral = re.compile(r'\b(?:i|ii|iii|iv)\s', flags=re.IGNORECASE)
+# The number a book name starts with, split from the rest of the name. Example: "1 Nephi" –> "1", "Nephi"
+leading_book_number = re.compile(rf'^([1-{data.highest_book_number}])\s(.+)$')
 
 # A single digit. Every reference needs a chapter number, so text with no digits anywhere can't contain one.
 any_digit = re.compile(r'\d')
+
+# A detection that ends on a reference separator followed by a bare number, which may belong to a book name that follows rather than to the reference. Example: "Luc 2:10-11 | 2" in "Luc 2:10-11 | 2 Nephi 3"
+trailing_bare_number = re.compile(rf'(?:{reference_separators_pattern})\s*(\d{{1,3}})\s*$')
+# A word following the end of a detection. There's no "^" or "\A" here – .match() already anchors at its starting position, and neither of those would match there.
+following_word = re.compile(r'[^\W\d_]\S*')
 
 
 # Build a regex alternation that matches any of the given words, sharing common prefixes so the regex

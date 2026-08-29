@@ -79,6 +79,90 @@ reference_words = {
 }
 reference_word_keys = ('list_conjunctions', 'range_conjunctions', 'verse_words', 'chapter_words',)
 
+# Ordinal forms 1–13, for citing an article of faith by position ("First Article of Faith"), and – in the
+# first four entries – for a numbered book cited as "First Nephi" or "1st Nephi". A form's position in the
+# list is the number it stands for, so there are no numbers written out separately to keep in sync.
+# Gendered forms appear where the noun takes them: Portuguese cites "Regras de Fé", so an article there is
+# "Primeira regra de fé", while Spanish cites "Artículos de Fe" and so takes "Primer artículo de fe".
+ordinal_words = {
+  'en': [
+    ('first', '1st',), ('second', '2nd',), ('third', '3rd',), ('fourth', '4th',),
+    ('fifth', '5th',), ('sixth', '6th',), ('seventh', '7th',), ('eighth', '8th',),
+    ('ninth', '9th',), ('tenth', '10th',), ('eleventh', '11th',), ('twelfth', '12th',),
+    ('thirteenth', '13th',),
+  ],
+  'fr': [
+    ('premier', 'première', '1er', '1re', '1ère',),
+    ('deuxième', 'second', 'seconde', '2e', '2ème', '2d', '2de',),
+    ('troisième', '3e', '3ème',), ('quatrième', '4e', '4ème',), ('cinquième', '5e', '5ème',),
+    ('sixième', '6e', '6ème',), ('septième', '7e', '7ème',), ('huitième', '8e', '8ème',),
+    ('neuvième', '9e', '9ème',), ('dixième', '10e', '10ème',), ('onzième', '11e', '11ème',),
+    ('douzième', '12e', '12ème',), ('treizième', '13e', '13ème',),
+  ],
+  # Spanish has two accepted systems for 11 and 12 – the classical "undécimo" and the modern
+  # "decimoprimero" – and each ordinal has a masculine, a feminine, and (for 1, 3 and their compounds) an
+  # apocopated form used before a masculine noun. Every spelling is listed, so a reference resolves whichever
+  # the writer reached for, and whether or not the gender agrees with the name being cited.
+  'es': [
+    ('primero', 'primer', 'primera', '1º', '1er', '1ª',),
+    ('segundo', 'segunda', '2º', '2ª',),
+    ('tercero', 'tercer', 'tercera', '3º', '3er', '3ª',),
+    ('cuarto', 'cuarta', '4º', '4ª',),
+    ('quinto', 'quinta', '5º', '5ª',),
+    ('sexto', 'sexta', '6º', '6ª',),
+    ('séptimo', 'séptima', '7º', '7ª',),
+    ('octavo', 'octava', '8º', '8ª',),
+    ('noveno', 'novena', '9º', '9ª',),
+    ('décimo', 'décima', '10º', '10ª',),
+    ('undécimo', 'undécima', 'decimoprimero', 'decimoprimera', 'decimoprimer', 'décimo primero', 'décima primera', 'décimo primer', '11º', '11ª',),
+    ('duodécimo', 'duodécima', 'decimosegundo', 'decimosegunda', 'décimo segundo', 'décima segunda', '12º', '12ª',),
+    ('decimotercero', 'decimotercera', 'decimotercer', 'décimo tercero', 'décima tercera', 'décimo tercer', '13º', '13ª',),
+  ],
+  # Portuguese cites "Regras de Fé", which is feminine, so the feminine forms are the ones that occur – but
+  # the masculine are listed too, along with the classical "undécimo" and "duodécimo" alongside the ordinary
+  # two-word spellings.
+  'pt': [
+    ('primeiro', 'primeira', '1º', '1ª',), ('segundo', 'segunda', '2º', '2ª',),
+    ('terceiro', 'terceira', '3º', '3ª',), ('quarto', 'quarta', '4º', '4ª',),
+    ('quinto', 'quinta', '5º', '5ª',), ('sexto', 'sexta', '6º', '6ª',),
+    ('sétimo', 'sétima', '7º', '7ª',), ('oitavo', 'oitava', '8º', '8ª',),
+    ('nono', 'nona', '9º', '9ª',), ('décimo', 'décima', '10º', '10ª',),
+    ('décimo primeiro', 'décima primeira', 'undécimo', 'undécima', '11º', '11ª',),
+    ('décimo segundo', 'décima segunda', 'duodécimo', 'duodécima', '12º', '12ª',),
+    ('décimo terceiro', 'décima terceira', '13º', '13ª',),
+  ],
+}
+
+# Roman numerals are typography rather than language, so they stand in for a book number in any language.
+# Only 1–4 are needed, since no book is numbered higher.
+roman_numeral_words = ['i', 'ii', 'iii', 'iv']
+
+# The highest number any book name starts with ("4 Nephi"). patterns.leading_book_number is built from this.
+highest_book_number = len(roman_numeral_words)
+
+# Get a map of ordinal form to the number it stands for, for an article of faith cited by position
+ordinal_forms_cache = {}
+def get_ordinal_forms(lang):
+  if lang not in ordinal_forms_cache:
+    ordinal_forms_cache[lang] = {
+      form.lower(): index + 1
+      for index, group in enumerate(ordinal_words.get(lang, []))
+      for form in group
+    }
+  return ordinal_forms_cache[lang]
+
+# Get a map of number form to the number it stands for, for the prefix on a numbered book name. It's the
+# ordinals above, stopping at the highest number any book carries, plus the roman numerals that work in
+# every language.
+book_number_forms_cache = {}
+def get_book_number_forms(lang):
+  if lang not in book_number_forms_cache:
+    forms = {form: number for form, number in get_ordinal_forms(lang).items() if number <= highest_book_number}
+    for index, form in enumerate(roman_numeral_words):
+      forms.setdefault(form, index + 1)
+    book_number_forms_cache[lang] = forms
+  return book_number_forms_cache[lang]
+
 # List conjunctions from every language, split into the ones written as a word ("and", "y", "et") and the ones written as a symbol ("&")
 all_list_conjunctions = sorted({c for words in reference_words.values() for c in words['list_conjunctions']})
 list_conjunction_words = [c for c in all_list_conjunctions if any(char.isalpha() for char in c)]
@@ -111,6 +195,69 @@ def get_map_to_slug_normalized():
   if map_to_slug_normalized is None:
     map_to_slug_normalized = {normalize_for_compare(key): value for key, value in scriptures['mapToSlug'].items()}
   return map_to_slug_normalized
+
+
+# The shortest normalized name that's worth matching loosely. Below this, a single typo is most of the word – "Alma" is one edit away from far too much ordinary text.
+minimum_fuzzy_name_length = 5
+
+# Every spelling of a name with one letter taken out. Example: "alma" –> ["lma", "ama", "ala", "alm"]
+# Digits are never dropped, so a number always has to match exactly – it's part of which book is meant, not
+# something that can be mistyped into another book. Without that, "5th Nephi" would resolve to "4th Nephi",
+# which is a real name one substitution away.
+def get_single_character_deletions(key):
+  return [key[:i] + key[i + 1:] for i in range(len(key)) if not key[i].isdigit()]
+
+# Get a map of every single-character deletion of every known name to its book slug. Comparing deletions on
+# both sides is what makes a one-character difference cheap to find: a missing letter, an extra letter, or a
+# wrong letter all line up on some shared deletion, so a lookup costs one dict get per character instead of
+# a comparison against all ~10,000 names. Names that two different slugs both claim are dropped, since an
+# ambiguous match is worse than none. Built the first time a name fails to match exactly, since input that's
+# spelled correctly never needs it.
+map_to_slug_deletions = None
+def get_map_to_slug_deletions():
+  global map_to_slug_deletions
+  if map_to_slug_deletions is None:
+    map_to_slug_deletions = {}
+    for key, value in scriptures['mapToSlug'].items():
+      normalized_key = normalize_for_compare(key)
+      if len(normalized_key) < minimum_fuzzy_name_length:
+        continue
+      for deletion in get_single_character_deletions(normalized_key):
+        map_to_slug_deletions[deletion] = value if map_to_slug_deletions.get(deletion, value) == value else None
+  return map_to_slug_deletions
+
+# Look up a book slug for a normalized name that's off by one character. Diacritics are already handled by
+# normalize_for_compare, so only letter-level slips reach this point. Like mapToSlug itself, the index covers
+# every language's names, so a typo resolves no matter which language was asked for.
+def fuzzy_map_to_slug(normalized_name):
+  if len(normalized_name) < minimum_fuzzy_name_length:
+    return None
+  deletions = get_map_to_slug_deletions()
+
+  # The known name has one character that the input is missing
+  slug = deletions.get(normalized_name)
+  if slug:
+    return slug
+
+  # The input has one character too many, or one character wrong
+  for deletion in get_single_character_deletions(normalized_name):
+    slug = deletions.get(deletion)
+    if slug:
+      return slug
+
+  return None
+
+
+# Look up the book slug for a name as it was written. The name is tried as-is, then normalized (which folds
+# case, diacritics and punctuation), and finally – unless allow_loose_match is False – as a name that's off
+# by one character. Every caller that resolves a name should come through here, so the three stages stay in
+# one order.
+def get_book_slug(book_string, allow_loose_match = True):
+  slug = scriptures['mapToSlug'].get(book_string)
+  if slug:
+    return slug
+  normalized_name = normalize_for_compare(book_string)
+  return get_map_to_slug_normalized().get(normalized_name) or (fuzzy_map_to_slug(normalized_name) if allow_loose_match else None)
 
 
 # Get regex patterns for the words that can appear in a scripture reference in a given language. Languages that aren't listed above return empty patterns.
