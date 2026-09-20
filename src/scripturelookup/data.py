@@ -144,11 +144,15 @@ highest_book_number = len(roman_numeral_words)
 ordinal_forms_cache = {}
 def get_ordinal_forms(lang):
   if lang not in ordinal_forms_cache:
-    ordinal_forms_cache[lang] = {
-      form.lower(): index + 1
-      for index, group in enumerate(ordinal_words.get(lang, []))
-      for form in group
-    }
+    forms = {}
+    for index, group in enumerate(ordinal_words.get(lang, [])):
+      for form in group:
+        forms[form.lower()] = index + 1
+        # The ordinal indicators are hard to type on many keyboards, so "1º" is also accepted as "1o" and
+        # "1ª" as "1a". They're derived rather than listed, so a language only spells out what's linguistic.
+        plain_form = form.lower().replace('º', 'o').replace('ª', 'a')
+        forms.setdefault(plain_form, index + 1)
+    ordinal_forms_cache[lang] = forms
   return ordinal_forms_cache[lang]
 
 # Get a map of number form to the number it stands for, for the prefix on a numbered book name. It's the
@@ -162,6 +166,22 @@ def get_book_number_forms(lang):
       forms.setdefault(form, index + 1)
     book_number_forms_cache[lang] = forms
   return book_number_forms_cache[lang]
+
+# Get the maps above keyed for comparison, so the number a matched form stands for can be looked up however
+# the form was spelled. The pattern built from these forms matches text the map has no key for: a character
+# class matches "Decimo" where the map holds "décimo", and whitespace is matched loosely, so "décimo
+# primero" can arrive with a non-breaking space between the words.
+normalized_ordinal_forms_cache = {}
+def get_normalized_ordinal_forms(lang):
+  if lang not in normalized_ordinal_forms_cache:
+    normalized_ordinal_forms_cache[lang] = {normalize_for_compare(form): number for form, number in get_ordinal_forms(lang).items()}
+  return normalized_ordinal_forms_cache[lang]
+
+normalized_book_number_forms_cache = {}
+def get_normalized_book_number_forms(lang):
+  if lang not in normalized_book_number_forms_cache:
+    normalized_book_number_forms_cache[lang] = {normalize_for_compare(form): number for form, number in get_book_number_forms(lang).items()}
+  return normalized_book_number_forms_cache[lang]
 
 # List conjunctions from every language, split into the ones written as a word ("and", "y", "et") and the ones written as a symbol ("&")
 all_list_conjunctions = sorted({c for words in reference_words.values() for c in words['list_conjunctions']})

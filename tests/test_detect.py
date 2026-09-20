@@ -255,6 +255,31 @@ def test_spaced_out_verses_are_not_stripped_as_trailing_text():
   assert lookup.get_label('1 John 3:2 2') == '1\xa0John\xa03:2'
 
 
+# Words inside a parenthetical aren't context verses, even when a second reference splits the parenthetical apart
+def test_words_in_a_parenthetical_are_not_context_verses():
+  text = 'Matthew 7:1–2 (see JST Matthew 7:1–2)'
+  assert lookup.get_church_uri(text) == '/scriptures/nt/matt/7.1-2\n/scriptures/jst/jst-matt/7.1-2'
+  assert lookup.get_church_uri(text, use_query_parameters = True) == '/scriptures/nt/matt/7?id=p1-p2\n/scriptures/jst/jst-matt/7?id=p1-p2'
+  # ...while numbers still are
+  assert lookup.get_church_uri('Gen. 1:3 (3–4)') == '/scriptures/ot/gen/1.3(3-4)'
+
+
+# A footnote letter after a verse marks a study note, so it's dropped rather than taking the verse with it
+@pytest.mark.parametrize('text, expected_uri', [
+  ('Genesis 6:7a', '/scriptures/ot/gen/6.7'),
+  ('Genesis 6:7a, 13', '/scriptures/ot/gen/6.7,13'),
+  ('Alma 32:21a–23b', '/scriptures/bofm/alma/32.21-23'),
+  ('Gen. 1:3a (3–4)', '/scriptures/ot/gen/1.3(3-4)'),
+])
+def test_verse_footnote_letters_are_dropped(text, expected_uri):
+  assert lookup.get_church_uri(text) == expected_uri
+
+
+# A footnote letter is citation syntax rather than sloppy input, so it goes even when cleanup is skipped
+def test_verse_footnote_letters_are_dropped_even_when_cleanup_is_skipped():
+  assert lookup.get_church_uri('Genesis 6:7a', skip_cleanup = True) == '/scriptures/ot/gen/6.7'
+
+
 # A book with only one chapter takes a bare number as its verse – there is no Jude 3
 @pytest.mark.parametrize('text, expected_uris', [
   ('Jude 3', ['/scriptures/nt/jude/1.3']),
@@ -291,9 +316,18 @@ def test_single_chapter_rule_applies_even_when_cleanup_is_skipped():
   ('Premier Néphi 3:7', 'fr', '/scriptures/bofm/1-ne/3.7'),
   ('1er Néphi 3:7', 'fr', '/scriptures/bofm/1-ne/3.7'),
   ('Primer Nefi 3:7', 'es', '/scriptures/bofm/1-ne/3.7'),
+  ('1o Nefi 3:7', 'es', '/scriptures/bofm/1-ne/3.7'),
+  ('3a Nefi 11', 'es', '/scriptures/bofm/3-ne/11'),
+  ('2o Néfi 2:25', 'pt', '/scriptures/bofm/2-ne/2.25'),
 ])
 def test_book_numbers_may_be_written_out(text, lang, expected_uri):
   assert lookup.get_church_uri(text, lang = lang) == expected_uri
+
+
+# "1o" and "1a" stand in for "1º" and "1ª", but a verse with a footnote letter is never read as an ordinal
+def test_verse_letters_are_not_ordinals():
+  assert lookup.detect_references('Ver Génesis 6:7a Nefi 3:7.', lang = 'es') == [['Génesis 6:7', 4, 15]]
+  assert lookup.detect_references('Ver Alma 32:21a y 3a Nefi 11.', lang = 'es') == [['Alma 32:21', 4, 14], ['3a Nefi 11', 18, 28]]
 
 
 # An article of faith cited by position is that article, since the book is a single chapter
@@ -304,6 +338,8 @@ def test_book_numbers_may_be_written_out(text, lang, expected_uri):
   ('1er article de foi', 'fr', ['/scriptures/pgp/a-of-f/1.1']),
   ('Primer Artículo de Fe', 'es', ['/scriptures/pgp/a-of-f/1.1']),
   ('Primeira regra de fé', 'pt', ['/scriptures/pgp/a-of-f/1.1']),
+  ('1o artículo de fe', 'es', ['/scriptures/pgp/a-of-f/1.1']),
+  ('1a regra de fé', 'pt', ['/scriptures/pgp/a-of-f/1.1']),
   ('First and Third Articles of Faith', 'en', ['/scriptures/pgp/a-of-f/1.1', '/scriptures/pgp/a-of-f/1.3']),
   ('First through Third Articles of Faith', 'en', ['/scriptures/pgp/a-of-f/1.1-3']),
   ('Premier et troisième articles de foi', 'fr', ['/scriptures/pgp/a-of-f/1.1', '/scriptures/pgp/a-of-f/1.3']),
@@ -350,6 +386,18 @@ def test_portuguese_ordinal_spellings(text, expected_number):
   ('3er Nefi 3:7', 'es', '/scriptures/bofm/3-ne/3.7'),
 ])
 def test_abbreviated_ordinals_as_book_numbers(text, lang, expected_uri):
+  assert lookup.get_church_uri(text, lang = lang) == expected_uri
+
+
+# An ordinal matched with its accent left out resolves to the same number, since the character classes in the
+# pattern accept spellings that aren't listed as forms
+@pytest.mark.parametrize('text, lang, expected_uri', [
+  ('Decimo articulo de fe', 'es', '/scriptures/pgp/a-of-f/1.10'),
+  ('decimo primer articulo de fe', 'es', '/scriptures/pgp/a-of-f/1.11'),
+  ('Deuxieme article de foi', 'fr', '/scriptures/pgp/a-of-f/1.2'),
+  ('Premier Nephi 3:7', 'fr', '/scriptures/bofm/1-ne/3.7'),
+])
+def test_ordinals_resolve_without_their_accents(text, lang, expected_uri):
   assert lookup.get_church_uri(text, lang = lang) == expected_uri
 
 

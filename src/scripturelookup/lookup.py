@@ -201,7 +201,8 @@ def get_numbered_book_patterns(lang):
       numbered_book_pattern_cache[lang] = {
         'fragment': r'|'.join(rf'(?:{form_pattern})\s+(?:{stem_pattern})' for form_pattern, stem_pattern in branches),
         'rewrite': re.compile(rf'{patterns.reference_start_boundary_pattern}({rewrite_alternation})\s+', flags=re.IGNORECASE),
-        'number_by_form': number_by_form,
+        # Keyed for comparison, since the patterns above match spellings the plain forms don't cover
+        'number_by_form': data.get_normalized_book_number_forms(lang),
       }
   return numbered_book_pattern_cache[lang]
 
@@ -239,7 +240,8 @@ def get_ordinal_patterns(lang):
       ordinal_run = rf'(?:{ordinals})(?:(?:{joiner_alternation})(?:{ordinals}))*'
 
       ordinal_pattern_cache[lang] = {
-        'number_by_form': number_by_form,
+        # Keyed for comparison, since the patterns above match spellings the plain forms don't cover
+        'number_by_form': data.get_normalized_ordinal_forms(lang),
         # Spliced into the detection pattern as an anchor that needs no number after it – the ordinal is the number
         'fragment': rf'(?:{ordinal_run})\s+(?:{books})',
         'rewrite': re.compile(rf'{patterns.reference_start_boundary_pattern}({ordinal_run})\s+({books}){patterns.not_followed_by_letter_pattern}', flags=re.IGNORECASE),
@@ -263,7 +265,7 @@ def replace_ordinal_references(input_string, lang):
 
   def replace(match):
     ordinal_run, book_name = match.group(1), match.group(2)
-    ordinal_numbers = [ordinal_patterns['number_by_form'][ordinal.group(0).lower()] for ordinal in ordinal_patterns['single_ordinal'].finditer(ordinal_run)]
+    ordinal_numbers = [ordinal_patterns['number_by_form'][data.normalize_for_compare(ordinal.group(0))] for ordinal in ordinal_patterns['single_ordinal'].finditer(ordinal_run)]
     is_range = len(ordinal_numbers) > 1 and ordinal_patterns['range_conjunction'] and ordinal_patterns['range_conjunction'].search(ordinal_run)
     numbers_string = f'{ordinal_numbers[0]}-{ordinal_numbers[-1]}' if is_range else ','.join(str(number) for number in ordinal_numbers)
     return f'{book_name} {numbers_string}'
@@ -278,7 +280,7 @@ def replace_book_number_prefixes(input_string, lang):
     return input_string
 
   def replace(match):
-    return str(numbered_book_patterns['number_by_form'][match.group(1).lower()]) + ' '
+    return str(numbered_book_patterns['number_by_form'][data.normalize_for_compare(match.group(1))]) + ' '
   return numbered_book_patterns['rewrite'].sub(replace, input_string)
 
 
@@ -507,6 +509,8 @@ def parse_verses_string(verses_string, lang = 'en', range_split_limit = 1):
   verses_string = (verses_string or '').replace('p', '').strip()
   if not verses_string:
     return None
+  # A footnote letter marks a study note, not part of the verse, so it's dropped. Example: "7a" –> "7"
+  verses_string = patterns.verse_footnote_letter.sub('', verses_string)
   
   unique_verses = set()
   all_verses_are_integers = True
@@ -732,7 +736,9 @@ def parse_references_string(input_string, lang = 'en', sort_by = None, skip_clea
         unparsed = input_string
         verses_string = ''
       verses_string, remaining_context_verses_string = (patterns.opening_parenthesis.split(patterns.closing_parenthesis.sub('', verses_string)) + [''])[:2]
-      if context_verses_string is None:
+      # Only numbers count as context verses, so stray words after an unclosed parenthesis are dropped. Example: "Matthew 7:1–2 (see" –> "Matthew 7:1–2"
+      remaining_context_verses_string = remaining_context_verses_string.strip()
+      if context_verses_string is None and patterns.numbers_and_separators.match(remaining_context_verses_string):
         context_verses_string = remaining_context_verses_string
 
       # Get chapter string and book string

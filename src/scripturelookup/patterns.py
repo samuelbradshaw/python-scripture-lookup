@@ -56,6 +56,11 @@ chapter_range = re.compile(rf'\d+(?:{verse_range_separators_pattern})\d+')
 number_continuation_pattern = rf'\d|\s|{chapter_verse_separators_pattern}|{verse_range_separators_pattern}|{verse_group_separators_pattern}'
 # A string made up entirely of numbers and separators. Example: "3, 5–7"
 numbers_and_separators = re.compile(rf'^\d(?:{number_continuation_pattern})*$')
+# A footnote letter after a verse number. Example: "6:7a" –> "6:7"
+# Only parsing strips it – the detection patterns stop at the digit, so a detected span covers "Alma 32:21"
+# rather than "Alma 32:21a". Letting detection take a trailing letter would swallow the Spanish and
+# Portuguese range conjunction, as in "Alma 32:21 a 23".
+verse_footnote_letter = re.compile(rf'(?<=\d)[a-zA-Z]{not_followed_by_letter_pattern}')
 # The chapter and verses at the end of a reference, so the book name can be split off the front
 trailing_chapter = re.compile(rf'^.*?(\d(?:{number_continuation_pattern})*)$')
 # Text after the end of a reference. Example: "1 John 3:2 2" –> " 2"
